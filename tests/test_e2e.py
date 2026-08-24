@@ -8,6 +8,22 @@ if os.getenv("RUN_E2E") != "1":
 from playwright.sync_api import expect
 
 
+def test_initial_view_contains_only_human_vs_ai_controls(page, live_server_url):
+    page.goto(live_server_url)
+    expect(page.locator("#human-agent-field")).to_be_visible()
+    expect(page.locator(".ai-field")).to_have_count(4)
+    for field in page.locator(".ai-field").all():
+        expect(field).to_be_hidden()
+
+
+def test_winning_line_appears_for_completed_game(page, live_server_url):
+    page.goto(live_server_url)
+    page.get_by_role("button", name="Local players").click()
+    for index in (0, 3, 1, 4, 2):
+        page.locator(".cell").nth(index).click()
+    expect(page.locator(".winning-line.row-0")).to_be_visible()
+
+
 def test_ai_vs_ai_replay_controls(page, live_server_url):
     page.goto(live_server_url)
     page.get_by_role("button", name="AI vs AI").click()
