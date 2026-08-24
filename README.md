@@ -1,202 +1,82 @@
-# Kółko i Krzyżyk AI - Instrukcja Użytkownika
+# Tic-Tac-Toe AI Lab
 
-## Opis Projektu
+A web-based Tic-Tac-Toe laboratory for playing against and comparing classic search algorithms, tabular reinforcement learning, and neural policies.
 
-Zaawansowana implementacja gry Kółko i Krzyżyk z czterema algorytmami AI:
-- **Minimax** z Alpha-Beta Pruning (niepokonalny)
-- **Reguły** - system ekspertowy
-- **Q-learning** - niepokonalny agent uczenia się
-- **MCTS** - Monte Carlo Tree Search
+The original project was created on GitLab; this repository is its GitHub fork. The original source remains available at [gitlab.com/Tomakao/kolkokrzyzyk](https://gitlab.com/Tomakao/kolkokrzyzyk).
 
-## Struktura Folderów
+## Agents
 
-```
-kolkokrzyzyk/
-├── ai/                      # Wszystkie algorytmy AI
-│   ├── gotowe_tabele/       # Wytrenowane modele do użycia
-│   ├── q_tables/           # Foldery treningowe Q-learning
-│   ├── agent_q_learning.py # Implementacja Q-learning
-│   ├── minimax.py          # Algorytm Minimax
-│   ├── reguly.py           # System reguł
-│   ├── mcts.py             # Monte Carlo Tree Search
-│   └── losowy_gracz.py     # Losowy gracz (do treningu)
-├── gra/                    # Logika gry
-│   └── logika.py           # Podstawowa mechanika gry
-├── gui/                    # Interfejs użytkownika
-│   ├── główne_okno.py      # Główne okno aplikacji
-│   └── okno_wizualizacji.py # Wizualizacja drzewa Minimax
-├── Narzędzia/              # Narzędzia do treningu i oceny
-│   ├── evaluate_agent.py   # Ocena wydajności agentów
-│   └── logs/               # Logi z oceny wydajności
-├── main_final.py           # Główny plik do uruchomienia
-└── requirements.txt        # Wymagane biblioteki
-```
+- Random baseline
+- Rule-based expert system
+- Minimax with alpha-beta pruning
+- Monte Carlo Tree Search
+- Tabular Q-learning
+- Deep Q-Network (DQN)
+- Minimax imitation network
+- REINFORCE policy-gradient network
 
-## Modele AI
+The trained agents are pure policies: no hidden win/block heuristic is applied during inference. Neural networks are trained with PyTorch and deployed as compact ONNX models.
 
-### Gdzie Znajdują Się Modele
+## Web application
 
-- **Gotowe modele**: `ai/gotowe_tabele/model.pkl`
-- **Sesje treningowe**: `ai/q_tables/q_learning_table_X/model.pkl`
-- **Każdy folder treningowy zawiera**:
-  - `model.pkl` - wytrenowany model
-  - `training.log` - szczegółowe logi treningu
-
-### Jak Używać Modeli
-
-**Główny program automatycznie ładuje model z**: `ai/gotowe_tabele/model.pkl`
-
-Jeśli chcesz użyć innego modelu:
-1. Skopiuj wybrany `model.pkl` do folderu `ai/gotowe_tabele/`
-2. Uruchom program ponownie
-
-## Trenowanie Modeli
-
-### Proces Treningu Q-learning
-
-Trening odbywa się w 4 fazach:
-
-1. **Faza 1**: Uczenie od eksperta (Minimax) - 500 gier
-2. **Faza 2**: Eksploracja (vs Random) - 20 x 5000 gier
-3. **Faza 3**: Trening strategiczny (mieszani przeciwnicy) - 40 iteracji
-4. **Faza 4**: Finalne dostrojenie (vs Minimax) - 10 iteracji
-
-### Gdzie Trafiają Wytrenowane Modele
-
-- **Nowe modele**: `ai/q_tables/q_learning_table_X/`
-- **Najlepsze modele**: ręcznie kopiowane do `ai/gotowe_tabele/`
-
-### Trenowanie Nowego Modelu
+The interface supports Human vs AI, local Player vs Player, and AI vs AI series. AI matches include deterministic seeds, complete move replays, pause/resume, single-step playback, five speeds, and aggregate results. English/Polish language and light/dark theme preferences are stored in first-party cookies.
 
 ```bash
-cd ai
-python agent_q_learning.py
+git clone https://github.com/SzczepanGrela/tic-tac-toe-ai.git
+cd tic-tac-toe-ai
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements-web.txt
+python -m uvicorn web.app:app --host 127.0.0.1 --port 8084
 ```
 
-Model zostanie zapisany w nowym folderze `q_learning_table_X/`
+Fish users should activate with `source .venv/bin/activate.fish`. On Windows PowerShell use `.venv\Scripts\Activate.ps1`.
 
-## Logi i Monitoring
-
-### Rodzaje Logów
-
-1. **Logi treningu**: `ai/q_tables/q_learning_table_X/training.log`
-   - Postęp treningu z czasem
-   - Statystyki wygranych/przegranych
-   - Rozmiar tabeli Q
-   - Parametry uczenia
-
-2. **Logi oceny**: `Narzędzia/logs/YYYY-MM-DD_HH-MM-SS.txt`
-   - Wyniki testów przeciwko różnym przeciwnikom
-   - Czas odpowiedzi
-   - Analiza wydajności
-
-### Gdzie Trafiają Logi
-
-- **Logi treningu**: w folderze każdego modelu
-- **Logi oceny**: w folderze `Narzędzia/logs/`
-
-## Użycie Głównego Programu
-
-### Uruchomienie
+Open `http://127.0.0.1:8084`, or run the container:
 
 ```bash
-python main_final.py
+docker build -f infra/Dockerfile -t tic-tac-toe-ai .
+docker run --rm -p 127.0.0.1:8084:8084 tic-tac-toe-ai
 ```
 
-### Wymagania
+## Training laboratory
+
+Training dependencies are intentionally separate from the production runtime:
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements-training.txt
+python -m training train --agent q_learning --preset standard --seeds 42
+python -m training train --agent dqn --preset standard --seeds 42
+python -m training train --agent imitation --preset standard --seeds 42
+python -m training train --agent reinforce --preset standard --seeds 42
 ```
 
-**Wymagane biblioteki**:
-- PySide6 (interfejs graficzny)
-- numpy (obliczenia)
+Presets are `smoke` for pipeline checks, `standard` for local experiments, and `full` for three-seed production experiments. Every run stores its configuration, checkpoint, metrics, seed, and ONNX validation result under the ignored `training/runs/` directory.
 
-### Funkcje Programu
-
-1. **Wybór trybu gry**: Menu rozwijane z opcjami
-   - Gracz vs Gracz
-   - Gracz vs Minimax
-   - Gracz vs Reguły
-   - Gracz vs Q-learning
-   - Gracz vs MCTS
-
-2. **Losowy start**: AI lub gracz rozpoczyna losowo
-
-3. **Wizualizacja**: Dla Minimax - zobacz drzewo decyzyjne
-
-4. **Statystyki**: Wyświetlane w konsoli po każdej grze
-
-### Umieszczanie Pliku .pkl
-
-**Gdzie umieścić plik modelu**:
-```
-ai/gotowe_tabele/model.pkl
-```
-
-**Jeśli main nie znajduje modelu**:
-1. Sprawdź czy plik nazywa się dokładnie `model.pkl`
-2. Sprawdź czy jest w folderze `ai/gotowe_tabele/`
-3. Jeśli nie ma folderu, utwórz go
-4. Program wyświetli ostrzeżenie, ale będzie działał bez Q-learning
-
-## Ocena Wydajności Modeli
-
-### Narzędzie Oceny
+Evaluate and promote a candidate only when it meets the documented quality gates:
 
 ```bash
-cd Narzędzia
-python evaluate_agent.py
+python -m training evaluate --agent dqn --run training/runs/<run> --games 1000
+python -m training promote --agent dqn --run training/runs/<run>
 ```
 
-### Co Testuje
+See [benchmark results](docs/benchmark.md) for the promoted models.
 
-- **Random**: 5000 gier (test bazowy)
-- **Smart Random**: 5000 gier (preferuje środek/narożniki)
-- **Reguły**: 3000 gier (system ekspertowy)
-- **MCTS**: 2000 gier (Monte Carlo)
-- **Minimax**: 2000 gier (test doskonałości)
+## Tests
 
-### Wyniki
+```bash
+python -m pip install -r requirements-dev.txt
+pytest
+```
 
-- **DOSKONAŁA**: 0% przegranych z Minimax
-- **ZNAKOMITA**: >90% wygranych z Random
-- **DOBRA**: >70% wygranych z Random
-- **SŁABA**: <70% wygranych z Random
+Browser tests additionally require `python -m playwright install chromium` and `RUN_E2E=1 pytest tests/test_e2e.py`.
 
-### Logi Oceny
+The original desktop application is preserved on the `archive/desktop-original` branch.
 
-Szczegółowe wyniki w: `Narzędzia/logs/YYYY-MM-DD_HH-MM-SS.txt`
+## Authors
 
-## Rozwiązywanie Problemów
+- Szczepan Grela
+- Tomasz Kosiński ([Tomakao](https://gitlab.com/Tomakao))
+- Karolina Broniewska
 
-### Model Się Nie Ładuje
-
-1. Sprawdź ścieżkę: `ai/gotowe_tabele/model.pkl`
-2. Sprawdź czy plik nie jest uszkodzony
-3. Spróbuj skopiować model z `ai/q_tables/q_learning_table_X/`
-
-### Program Się Nie Uruchamia
-
-1. Zainstaluj wymagania: `pip install -r requirements.txt`
-2. Sprawdź wersję Python (>=3.8)
-3. Upewnij się, że masz PySide6
-
-### AI Nie Odpowiada
-
-1. Sprawdź konsolę - mogą być błędy
-2. Zrestartuj program
-3. Sprawdź czy model jest poprawny
-
-## Wskazówki
-
-- **Najlepszy model**: Użyj modelu z najwyższym numerem sesji
-- **Testowanie**: Regularne uruchamianie `evaluate_agent.py`
-- **Wizualizacja**: Graj z Minimax aby zobaczyć drzewo decyzyjne
-- **Statystyki**: Obserwuj wyniki w konsoli
-- **Trening**: Dla nowych modeli trenuj minimum 2-3 godziny
-
-## Podsumowanie
-
-Program oferuje kompletną implementację AI do gry Kółko i Krzyżyk z zaawansowanymi algorytmami, systemem treningu i oceną wydajności. Użyj `main_final.py` do gry, a `evaluate_agent.py` do testowania modeli.
+Licensed under the [MIT License](LICENSE).
