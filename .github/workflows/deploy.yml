@@ -38,7 +38,6 @@ jobs:
           oauth-client-id: ${{ secrets.TS_CLIENT_ID }}
           audience: ${{ secrets.TS_AUDIENCE }}
           tags: tag:ci-vps
-          ping: ${{ secrets.SSH_HOST }}
       - name: Configure SSH
         run: |
           mkdir -p ~/.ssh
