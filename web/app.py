@@ -18,6 +18,7 @@ from game.state import GameState
 STATIC_DIR = Path(__file__).parent / "static"
 STATIC_ASSETS = {
     "app.js": ("application/javascript", (STATIC_DIR / "app.js").read_bytes()),
+    "favicon.svg": ("image/svg+xml", (STATIC_DIR / "favicon.svg").read_bytes()),
     "styles.css": ("text/css", (STATIC_DIR / "styles.css").read_bytes()),
 }
 LOCALE_ASSETS = {

@@ -20,6 +20,12 @@ def test_health_and_frontend():
     assert set(payload["agents"].values()) == {"ready"}
 
 
+def test_favicon_is_served():
+    response = request("GET", "/static/favicon.svg")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/svg+xml")
+
+
 def test_locales_have_matching_keys_and_reject_unknown_language():
     english = request("GET", "/locales/en.json")
     polish = request("GET", "/locales/pl.json")
