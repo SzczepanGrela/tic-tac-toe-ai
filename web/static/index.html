@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta id="meta-description" name="description" content="Play and compare eight Tic-Tac-Toe AI strategies.">
+  <title>Tic-Tac-Toe AI Lab</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div class="preferences" aria-label="Preferences" data-i18n-aria="preferences">
+        <div class="language-switch" aria-label="Language" data-i18n-aria="language">
+          <button id="lang-en" type="button" data-language="en" aria-pressed="true">EN</button>
+          <button id="lang-pl" type="button" data-language="pl" aria-pressed="false">PL</button>
+        </div>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-pressed="false">
+          <span class="theme-icon" aria-hidden="true">☾</span><span data-i18n="darkTheme">Dark</span>
+        </button>
+      </div>
+      <p class="eyebrow" data-i18n="eyebrow">Interactive machine-learning playground</p>
+      <h1>Tic-Tac-Toe <span>AI Lab</span></h1>
+      <p class="lede" data-i18n="lede">Play against classic search algorithms and trained policies, or let two agents compete move by move.</p>
+    </header>
+
+    <section class="lab-card">
+      <nav class="mode-tabs" aria-label="Game mode" data-i18n-aria="gameMode">
+        <button data-mode="human" class="active" data-i18n="humanVsAi">Human vs AI</button>
+        <button data-mode="ai" data-i18n="aiVsAi">AI vs AI</button>
+        <button data-mode="local" data-i18n="localPlayers">Local players</button>
+      </nav>
+
+      <div class="settings">
+        <label id="human-agent-field"><span data-i18n="opponent">Opponent</span><select id="human-agent"></select></label>
+        <label class="ai-field"><span data-i18n="xAgent">X agent</span><select id="x-agent"></select></label>
+        <label class="ai-field"><span data-i18n="oAgent">O agent</span><select id="o-agent"></select></label>
+        <label class="ai-field"><span data-i18n="games">Games</span><select id="series-count"><option>1</option><option>3</option><option>5</option><option>10</option></select></label>
+        <label class="ai-field"><span data-i18n="seed">Seed</span><input id="seed" inputmode="numeric" placeholder="random" data-i18n-placeholder="random"></label>
+        <button id="start" class="primary" data-i18n="newGame">New game</button>
+      </div>
+
+      <div id="algorithm-note" class="algorithm-note"></div>
+      <div id="status" class="status" role="status" aria-live="polite">Ready</div>
+      <div id="board" class="board" aria-label="Tic-Tac-Toe board" data-i18n-aria="board"></div>
+
+      <div id="replay-controls" class="replay-controls hidden">
+        <button id="pause" data-i18n="pause">Pause</button>
+        <button id="step" data-i18n="step">Step</button>
+        <label><span data-i18n="speed">Speed</span><select id="speed"><option value="1600">0.25×</option><option value="900">0.5×</option><option value="500" selected>1×</option><option value="250">2×</option><option value="125">4×</option></select></label>
+      </div>
+
+      <div id="scoreboard" class="scoreboard hidden">
+        <div><strong id="x-wins">0</strong><span data-i18n="xWins">X wins</span></div>
+        <div><strong id="draws">0</strong><span data-i18n="draws">Draws</span></div>
+        <div><strong id="o-wins">0</strong><span data-i18n="oWins">O wins</span></div>
+        <p id="series-meta"></p>
+      </div>
+    </section>
+  </main>
+  <footer>Minimax · Rules · MCTS · Q-learning · DQN · Imitation · REINFORCE</footer>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
