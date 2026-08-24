@@ -1,0 +1,12 @@
+.git
+.github
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.coverage
+tests
+tools
+docs
+README.md
+training
