@@ -1,0 +1,13 @@
+{
+  "agent": "imitation",
+  "format_version": 1,
+  "source_run": "imitation-20260823T235221Z-seed42",
+  "training_config": {
+    "architecture": "18-128-128-9",
+    "learning_rate": 0.001,
+    "preset": "standard",
+    "states": 4520
+  },
+  "training_episodes": 100,
+  "training_seed": 42
+}

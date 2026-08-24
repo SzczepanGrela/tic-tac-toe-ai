@@ -1,0 +1,22 @@
+{
+  "agent": "reinforce",
+  "format_version": 1,
+  "source_run": "reinforce-20260824T003136Z-seed53",
+  "training_config": {
+    "architecture": "18-128-128-9",
+    "batch_size": 256,
+    "checkpoint_selection": "best quick evaluation",
+    "entropy_weight": {
+      "final": 0.001,
+      "initial": 0.02
+    },
+    "export_logit_scale": 0.25,
+    "learning_rate": 0.0005,
+    "preset": "full",
+    "reward": "1 for an optimal solver move, -4 otherwise",
+    "training_states": 4520,
+    "weight_decay": 1e-05
+  },
+  "training_episodes": 5000000,
+  "training_seed": 53
+}

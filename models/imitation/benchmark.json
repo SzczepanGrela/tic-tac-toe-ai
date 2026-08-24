@@ -1,0 +1,42 @@
+{
+  "promotion_passed": true,
+  "results": {
+    "mcts": {
+      "draws": 89,
+      "games": 100,
+      "illegal_moves": 0,
+      "losses": 0,
+      "non_loss_rate": 1.0,
+      "opponent": "mcts",
+      "wins": 11
+    },
+    "minimax": {
+      "draws": 98,
+      "games": 100,
+      "illegal_moves": 0,
+      "losses": 0,
+      "non_loss_rate": 1.0,
+      "opponent": "minimax",
+      "wins": 2
+    },
+    "random": {
+      "draws": 42,
+      "games": 500,
+      "illegal_moves": 0,
+      "losses": 0,
+      "non_loss_rate": 1.0,
+      "opponent": "random",
+      "wins": 458
+    },
+    "rules": {
+      "draws": 500,
+      "games": 500,
+      "illegal_moves": 0,
+      "losses": 0,
+      "non_loss_rate": 1.0,
+      "opponent": "rules",
+      "wins": 0
+    }
+  },
+  "seed": 42
+}

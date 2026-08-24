@@ -1,0 +1,15 @@
+{
+  "agent": "dqn",
+  "format_version": 1,
+  "source_run": "dqn-20260823T235327Z-seed42",
+  "training_config": {
+    "architecture": "18-128-128-9",
+    "discount_factor": 0.99,
+    "learning_rate": 0.001,
+    "preset": "standard",
+    "replay_size": 50000,
+    "target_update": 500
+  },
+  "training_episodes": 20000,
+  "training_seed": 42
+}
