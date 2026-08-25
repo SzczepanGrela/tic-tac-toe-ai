@@ -36,7 +36,9 @@ if [[ "$1" == "logs" ]]; then
 fi
 if [[ "$1" == "inspect" && "$2" == "--format" ]]; then
   target="$4"
-  if [[ "$3" == *Health.Status* ]]; then
+  if [[ "$target" == "nginx-proxy-manager" && "$3" == *NetworkSettings.Networks* ]]; then
+    printf '172.30.0.2\n'
+  elif [[ "$3" == *Health.Status* ]]; then
     if [[ "$target" == *candidate ]]; then
       [[ "${CANDIDATE_HEALTH}" == "healthy" ]] && printf 'healthy\n' || printf 'unhealthy\n'
     else
@@ -114,6 +116,7 @@ def test_successful_candidate_is_promoted(tmp_path: Path) -> None:
     assert "completed successfully" in result.stdout
     assert "rm -f tic-tac-toe-ai\n" in log
     assert "run -d --name tic-tac-toe-ai " in log
+    assert "--env FORWARDED_ALLOW_IPS=127.0.0.1,172.30.0.2" in log
     assert "exec nginx-proxy-manager nginx -s reload" in log
 
 

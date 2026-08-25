@@ -36,6 +36,34 @@ def test_ai_vs_ai_replay_controls(page, live_server_url):
     page.get_by_role("button", name="Step").click()
 
 
+def test_ai_vs_ai_displays_non_draw_score(page, live_server_url):
+    page.goto(live_server_url)
+    page.get_by_role("button", name="AI vs AI").click()
+    page.locator("#x-agent").select_option("random")
+    page.locator("#o-agent").select_option("minimax")
+    page.locator("#series-count").select_option("10")
+    page.locator("#seed").fill("42")
+    page.get_by_role("button", name="Run series").click()
+
+    page.locator("#scoreboard:not(.hidden)").wait_for()
+    expect(page.locator("#x-wins")).to_have_text("0")
+    expect(page.locator("#o-wins")).to_have_text("9")
+    expect(page.locator("#draws")).to_have_text("1")
+
+
+def test_new_human_game_enables_board_after_side_changes(page, live_server_url):
+    page.goto(live_server_url)
+    page.evaluate("Math.random = () => 0.9")
+    page.get_by_role("button", name="New game").click()
+    expect(page.locator(".cell.x")).to_have_count(1)
+
+    page.evaluate("Math.random = () => 0")
+    page.get_by_role("button", name="New game").click()
+
+    expect(page.locator(".cell").first).to_be_enabled()
+    expect(page.locator(".cell.x, .cell.o")).to_have_count(0)
+
+
 def test_theme_and_language_are_saved_without_resetting_game(page, live_server_url):
     page.goto(live_server_url)
     expect(page.locator("html")).to_have_attribute("lang", "en")

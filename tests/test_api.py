@@ -2,7 +2,8 @@ import asyncio
 
 from httpx import ASGITransport, AsyncClient
 
-from web.app import RateLimiter, app, lifespan
+import web.app as web_app
+from web.app import TokenBucket, app, lifespan
 
 
 def request(method: str, path: str, **kwargs):
@@ -54,15 +55,34 @@ def test_match_series_is_reproducible_and_complete():
     assert all(5 <= len(game["moves"]) <= 9 for game in result["games"])
 
 
+def test_match_series_reports_non_draw_scores():
+    payload = {"x_algorithm": "random", "o_algorithm": "minimax", "games": 10, "seed": 42}
+    response = request("POST", "/api/matches", json=payload)
+
+    assert response.status_code == 200
+    assert response.json()["summary"] == {"x_wins": 0, "o_wins": 9, "draws": 1}
+
+
 def test_match_rejects_invalid_game_count():
     response = request("POST", "/api/matches", json={"x_algorithm": "minimax", "o_algorithm": "rules", "games": 11})
     assert response.status_code == 422
 
 
-def test_rate_limiter_blocks_excess_requests():
+def test_token_bucket_supports_bursts_and_weighted_costs():
     async def exercise():
-        limiter = RateLimiter(2)
-        assert await limiter.allow("client")
-        assert await limiter.allow("client")
-        assert not await limiter.allow("client")
+        limiter = TokenBucket(capacity=3, refill_per_second=1)
+        assert await limiter.consume("client", cost=2) is None
+        assert await limiter.consume("client") is None
+        assert await limiter.consume("client") == 1
     asyncio.run(exercise())
+
+
+def test_rate_limit_response_includes_retry_after(monkeypatch):
+    monkeypatch.setattr(web_app, "match_limiter", TokenBucket(capacity=1, refill_per_second=0.01))
+    payload = {"x_algorithm": "random", "o_algorithm": "random", "games": 1, "seed": 7}
+
+    assert request("POST", "/api/matches", json=payload).status_code == 200
+    limited = request("POST", "/api/matches", json=payload)
+
+    assert limited.status_code == 429
+    assert int(limited.headers["retry-after"]) > 0

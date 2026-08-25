@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import random
 import secrets
 import time
-from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -73,27 +73,32 @@ class MatchResponse(BaseModel):
     summary: MatchSummary
 
 
-class RateLimiter:
-    def __init__(self, limit: int, window_seconds: int = 60) -> None:
-        self.limit = limit
-        self.window_seconds = window_seconds
-        self.requests: defaultdict[str, deque[float]] = defaultdict(deque)
+class TokenBucket:
+    def __init__(self, capacity: int, refill_per_second: float) -> None:
+        self.capacity = float(capacity)
+        self.refill_per_second = refill_per_second
+        self.buckets: dict[str, tuple[float, float]] = {}
         self.lock = asyncio.Lock()
 
-    async def allow(self, key: str) -> bool:
+    async def consume(self, key: str, cost: int = 1) -> int | None:
+        if cost < 1 or cost > self.capacity:
+            raise ValueError("Token cost must be between 1 and bucket capacity")
         now = time.monotonic()
         async with self.lock:
-            timestamps = self.requests[key]
-            while timestamps and timestamps[0] <= now - self.window_seconds:
-                timestamps.popleft()
-            if len(timestamps) >= self.limit:
-                return False
-            timestamps.append(now)
-            return True
+            tokens, updated_at = self.buckets.get(key, (self.capacity, now))
+            tokens = min(
+                self.capacity,
+                tokens + (now - updated_at) * self.refill_per_second,
+            )
+            if tokens >= cost:
+                self.buckets[key] = (tokens - cost, now)
+                return None
+            self.buckets[key] = (tokens, now)
+            return max(1, math.ceil((cost - tokens) / self.refill_per_second))
 
 
-move_limiter = RateLimiter(30)
-match_limiter = RateLimiter(3)
+move_limiter = TokenBucket(capacity=10, refill_per_second=0.5)
+match_limiter = TokenBucket(capacity=30, refill_per_second=0.5)
 
 
 @asynccontextmanager
@@ -146,8 +151,13 @@ def _select_move(registry: AgentRegistry, agent_id: AgentId, state: GameState, r
 
 @app.post("/api/move", response_model=MoveResponse)
 async def calculate_move(payload: MoveRequest, request: Request) -> MoveResponse:
-    if not await move_limiter.allow(_client_ip(request)):
-        raise HTTPException(status_code=429, detail="Move rate limit exceeded")
+    retry_after = await move_limiter.consume(_client_ip(request))
+    if retry_after is not None:
+        raise HTTPException(
+            status_code=429,
+            detail="Move rate limit exceeded",
+            headers={"Retry-After": str(retry_after)},
+        )
     try:
         state = GameState.from_board(payload.board)
     except ValueError as exc:
@@ -189,8 +199,13 @@ def _simulate_matches(payload: MatchRequest, registry: AgentRegistry, seed: int)
 
 @app.post("/api/matches", response_model=MatchResponse)
 async def calculate_matches(payload: MatchRequest, request: Request) -> MatchResponse:
-    if not await match_limiter.allow(_client_ip(request)):
-        raise HTTPException(status_code=429, detail="Match-series rate limit exceeded")
+    retry_after = await match_limiter.consume(_client_ip(request), cost=payload.games)
+    if retry_after is not None:
+        raise HTTPException(
+            status_code=429,
+            detail="Match-series rate limit exceeded",
+            headers={"Retry-After": str(retry_after)},
+        )
     seed = payload.seed if payload.seed is not None else secrets.randbits(32)
     async with AI_SEMAPHORE:
         return _simulate_matches(payload, request.app.state.registry, seed)

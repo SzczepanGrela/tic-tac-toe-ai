@@ -8,6 +8,7 @@ NETWORK_NAME="tictactoe-network"
 NPM_CONTAINER="nginx-proxy-manager"
 HEALTHCHECK_ATTEMPTS="${HEALTHCHECK_ATTEMPTS:-12}"
 HEALTHCHECK_INTERVAL="${HEALTHCHECK_INTERVAL:-5}"
+FORWARDED_ALLOW_IPS_VALUE="127.0.0.1"
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
@@ -47,7 +48,25 @@ run_app() {
     --read-only \
     --tmpfs /tmp:size=32m,noexec,nosuid \
     --security-opt no-new-privileges:true \
+    --env "FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS_VALUE}" \
     "${image}"
+}
+
+configure_trusted_proxy() {
+  local proxy_ip=""
+
+  if ! container_exists "${NPM_CONTAINER}"; then
+    echo "Warning: ${NPM_CONTAINER} is not running; forwarded client addresses will not be trusted." >&2
+    return 0
+  fi
+
+  docker network connect "${NETWORK_NAME}" "${NPM_CONTAINER}" >/dev/null 2>&1 || true
+  proxy_ip="$(docker inspect --format "{{(index .NetworkSettings.Networks \"${NETWORK_NAME}\").IPAddress}}" "${NPM_CONTAINER}")"
+  if [[ -z "${proxy_ip}" ]]; then
+    echo "Could not determine the Nginx Proxy Manager address on ${NETWORK_NAME}." >&2
+    return 1
+  fi
+  FORWARDED_ALLOW_IPS_VALUE="127.0.0.1,${proxy_ip}"
 }
 
 reload_proxy() {
@@ -89,6 +108,7 @@ cleanup_candidate() {
 trap cleanup_candidate EXIT
 
 docker network inspect "${NETWORK_NAME}" >/dev/null 2>&1 || docker network create "${NETWORK_NAME}"
+configure_trusted_proxy
 docker build --pull -f infra/Dockerfile -t "${release_image}" .
 
 cleanup_candidate
