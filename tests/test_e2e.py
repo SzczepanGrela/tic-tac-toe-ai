@@ -24,6 +24,31 @@ def test_winning_line_appears_for_completed_game(page, live_server_url):
     expect(page.locator(".winning-line.row-0")).to_be_visible()
 
 
+def test_previous_ai_response_cannot_change_a_reset_board(page, live_server_url):
+    page.add_init_script("""
+        Math.random = () => 0.9;
+        const nativeFetch = window.fetch.bind(window);
+        window.fetch = (url, options) => {
+            if (url !== '/api/move') return nativeFetch(url, options);
+            return new Promise(resolve => {
+                window.resolvePendingAi = () => resolve(new Response(
+                    JSON.stringify({move: {row: 0, column: 0, player: 1}}),
+                    {status: 200, headers: {'Content-Type': 'application/json'}},
+                ));
+            });
+        };
+    """)
+    page.goto(live_server_url)
+    expect(page.get_by_role("status")).to_have_text("AI is thinking…")
+
+    page.get_by_role("button", name="Local players").click()
+    page.evaluate("window.resolvePendingAi()")
+    page.wait_for_timeout(50)
+
+    expect(page.locator(".cell.x, .cell.o")).to_have_count(0)
+    expect(page.get_by_role("status")).to_have_text("Player X's turn")
+
+
 def test_ai_vs_ai_replay_controls(page, live_server_url):
     page.goto(live_server_url)
     page.get_by_role("button", name="AI vs AI").click()
