@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import socket
 import subprocess
 import sys
@@ -11,6 +12,11 @@ import pytest
 
 @pytest.fixture(scope="session")
 def live_server_url():
+    external_url = os.getenv("E2E_BASE_URL")
+    if external_url:
+        yield external_url.rstrip("/")
+        return
+
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
