@@ -73,6 +73,10 @@ Browser tests additionally require `python -m playwright install chromium` and `
 
 The original desktop application is preserved on the `archive/desktop-original` branch.
 
+## Delivery
+
+Every release is tested once and published to the public GitHub Container Registry with an SBOM and provenance. Production deploys the same immutable image digest that passed Python, training, browser, container, and vulnerability checks. See the [deployment notes](infra/README.md) for the release and rollback contract.
+
 ## Authors
 
 - Szczepan Grela

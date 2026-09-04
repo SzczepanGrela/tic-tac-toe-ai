@@ -4,31 +4,44 @@ on:
   push:
   pull_request:
 
-permissions:
-  contents: read
+permissions: {}
+
+env:
+  IMAGE_NAME: ghcr.io/szczepangrela/tic-tac-toe-ai
 
 jobs:
   test:
+    name: Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: requirements-web.txt
       - run: python -m pip install -r requirements-web.txt pytest pytest-cov httpx
       - run: python -m compileall -q ai game training web
-      - run: python -m pytest --ignore=tests/test_e2e.py --cov=ai --cov=game --cov=web --cov-report=term-missing
+      - run: >-
+          python -m pytest --ignore=tests/test_e2e.py
+          --cov=ai --cov=game --cov=web --cov-report=term-missing
 
   training-smoke:
+    name: Training smoke
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
           cache: pip
@@ -40,10 +53,14 @@ jobs:
       - run: python -m training train --agent reinforce --preset smoke --seeds 42
 
   browser:
+    name: Browser
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
           cache: pip
@@ -54,13 +71,90 @@ jobs:
         env:
           RUN_E2E: "1"
 
-  docker:
+  container:
+    name: Container
+    needs: [test, training-smoke, browser]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build the tested image
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: infra/Dockerfile
-          push: false
+          platforms: linux/amd64
+          build-args: RELEASE_REVISION=${{ github.sha }}
+          tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          load: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
+          provenance: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'mode=max' || 'false' }}
+          sbom: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Scan fixable high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && format('{0}@{1}', env.IMAGE_NAME, steps.build.outputs.digest) || format('{0}:{1}', env.IMAGE_NAME, github.sha) }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+      - name: Attest the published image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  quality-gate:
+    name: Quality gate
+    if: always()
+    needs: [test, training-smoke, browser, container]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every quality job
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+          TRAINING_RESULT: ${{ needs.training-smoke.result }}
+          BROWSER_RESULT: ${{ needs.browser.result }}
+          CONTAINER_RESULT: ${{ needs.container.result }}
+        run: |
+          for result in "$TEST_RESULT" "$TRAINING_RESULT" "$BROWSER_RESULT" "$CONTAINER_RESULT"; do
+            test "$result" = success
+          done
+
+  deploy:
+    name: Deploy tested digest
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      vars.PRODUCTION_DEPLOY_ENABLED == 'true'
+    needs: [container, quality-gate]
+    permissions:
+      attestations: read
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/deploy.yml
+    with:
+      digest: ${{ needs.container.outputs.digest }}
+      expected_revision: ${{ github.sha }}
+    secrets: inherit
