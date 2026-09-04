@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import os
 import random
 import secrets
 import time
@@ -27,6 +28,7 @@ LOCALE_ASSETS = {
 }
 INDEX_HTML = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
 AI_SEMAPHORE = asyncio.Semaphore(2)
+RELEASE_REVISION = os.getenv("RELEASE_REVISION", "development")
 
 
 class MoveRequest(BaseModel):
@@ -74,17 +76,35 @@ class MatchResponse(BaseModel):
 
 
 class TokenBucket:
-    def __init__(self, capacity: int, refill_per_second: float) -> None:
+    def __init__(
+        self,
+        capacity: int,
+        refill_per_second: float,
+        cleanup_interval: float = 60.0,
+    ) -> None:
         self.capacity = float(capacity)
         self.refill_per_second = refill_per_second
+        self.cleanup_interval = cleanup_interval
         self.buckets: dict[str, tuple[float, float]] = {}
         self.lock = asyncio.Lock()
+        self._last_cleanup = time.monotonic()
+
+    def _remove_refilled_buckets(self, now: float) -> None:
+        if now - self._last_cleanup < self.cleanup_interval:
+            return
+        self.buckets = {
+            key: (tokens, updated_at)
+            for key, (tokens, updated_at) in self.buckets.items()
+            if tokens + (now - updated_at) * self.refill_per_second < self.capacity
+        }
+        self._last_cleanup = now
 
     async def consume(self, key: str, cost: int = 1) -> int | None:
         if cost < 1 or cost > self.capacity:
             raise ValueError("Token cost must be between 1 and bucket capacity")
         now = time.monotonic()
         async with self.lock:
+            self._remove_refilled_buckets(now)
             tokens, updated_at = self.buckets.get(key, (self.capacity, now))
             tokens = min(
                 self.capacity,
@@ -136,7 +156,11 @@ async def locale_asset(language: str) -> Response:
 
 @app.get("/api/health")
 async def health(request: Request) -> dict[str, object]:
-    return {"status": "ok", "agents": request.app.state.registry.health()}
+    return {
+        "status": "ok",
+        "revision": RELEASE_REVISION,
+        "agents": request.app.state.registry.health(),
+    }
 
 
 def _select_move(registry: AgentRegistry, agent_id: AgentId, state: GameState, rng: random.Random) -> tuple[int, int]:
@@ -166,7 +190,13 @@ async def calculate_move(payload: MoveRequest, request: Request) -> MoveResponse
         raise HTTPException(status_code=409, detail="The game is already over")
     seed = payload.seed if payload.seed is not None else secrets.randbits(32)
     async with AI_SEMAPHORE:
-        move = _select_move(request.app.state.registry, payload.algorithm, state, random.Random(seed))
+        move = await asyncio.to_thread(
+            _select_move,
+            request.app.state.registry,
+            payload.algorithm,
+            state,
+            random.Random(seed),
+        )
     return MoveResponse(move=Move(row=move[0], column=move[1], player=state.current_player), seed=seed)
 
 
@@ -208,4 +238,9 @@ async def calculate_matches(payload: MatchRequest, request: Request) -> MatchRes
         )
     seed = payload.seed if payload.seed is not None else secrets.randbits(32)
     async with AI_SEMAPHORE:
-        return _simulate_matches(payload, request.app.state.registry, seed)
+        return await asyncio.to_thread(
+            _simulate_matches,
+            payload,
+            request.app.state.registry,
+            seed,
+        )
