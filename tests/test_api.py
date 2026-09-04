@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 from httpx import ASGITransport, AsyncClient
 
@@ -18,6 +19,7 @@ def test_health_and_frontend():
     assert request("GET", "/").status_code == 200
     payload = request("GET", "/api/health").json()
     assert payload["status"] == "ok"
+    assert payload["revision"] == "development"
     assert set(payload["agents"].values()) == {"ready"}
 
 
@@ -74,6 +76,56 @@ def test_token_bucket_supports_bursts_and_weighted_costs():
         assert await limiter.consume("client", cost=2) is None
         assert await limiter.consume("client") is None
         assert await limiter.consume("client") == 1
+    asyncio.run(exercise())
+
+
+def test_token_bucket_removes_idle_refilled_clients():
+    async def exercise():
+        limiter = TokenBucket(capacity=2, refill_per_second=1, cleanup_interval=0)
+        now = time.monotonic()
+        limiter.buckets = {
+            "idle": (0, now - 3),
+            "active": (0, now - 0.1),
+        }
+
+        assert await limiter.consume("new") is None
+        assert "idle" not in limiter.buckets
+        assert "active" in limiter.buckets
+
+    asyncio.run(exercise())
+
+
+def test_slow_ai_work_does_not_block_health(monkeypatch):
+    def slow_move(registry, agent_id, state, rng):
+        time.sleep(0.2)
+        return state.get_available_moves()[0]
+
+    monkeypatch.setattr(web_app, "_select_move", slow_move)
+    monkeypatch.setattr(web_app, "move_limiter", TokenBucket(100, 100))
+
+    async def exercise():
+        async with lifespan(app):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                move = asyncio.create_task(
+                    client.post(
+                        "/api/move",
+                        json={
+                            "board": [[0, 0, 0], [0, 0, 0], [0, 0, 0]],
+                            "algorithm": "random",
+                        },
+                    )
+                )
+                await asyncio.sleep(0.02)
+                started_at = time.monotonic()
+                health_response = await client.get("/api/health")
+                elapsed = time.monotonic() - started_at
+
+                assert health_response.status_code == 200
+                assert elapsed < 0.1
+                assert (await move).status_code == 200
+
     asyncio.run(exercise())
 
 
