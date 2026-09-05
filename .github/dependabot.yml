@@ -12,6 +12,12 @@ updates:
     directory: /infra
     schedule:
       interval: weekly
+    # Runtime upgrades beyond 3.12 require an explicit compatibility change.
+    ignore:
+      - dependency-name: python
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
 
   - package-ecosystem: github-actions
     directory: /
