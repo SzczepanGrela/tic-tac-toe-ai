@@ -27,16 +27,16 @@ cd tic-tac-toe-ai
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements-web.txt
-python -m uvicorn web.app:app --host 127.0.0.1 --port 8084
+python -m uvicorn web.app:app --host 127.0.0.1 --port 8080
 ```
 
 Fish users should activate with `source .venv/bin/activate.fish`. On Windows PowerShell use `.venv\Scripts\Activate.ps1`.
 
-Open `http://127.0.0.1:8084`, or run the container:
+Open `http://127.0.0.1:8080`, or run the container:
 
 ```bash
 docker build -f infra/Dockerfile -t tic-tac-toe-ai .
-docker run --rm -p 127.0.0.1:8084:8084 tic-tac-toe-ai
+docker run --rm -p 127.0.0.1:8080:8080 tic-tac-toe-ai
 ```
 
 ## Training laboratory

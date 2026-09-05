@@ -32,7 +32,7 @@ Enable Dependabot security updates, secret scanning, and push protection. Restri
 
 ## VPS installation
 
-The application container listens on port `8084` inside `tictactoe-network`. Nginx Proxy Manager forwards `tictactoe.grela.dev` to `tic-tac-toe-ai:8084` with the `grela.dev wildcard (CF Origin)` certificate, Force SSL, HTTP/2, and HSTS enabled.
+The application container listens on port `8080` inside `tictactoe-network`. Nginx Proxy Manager forwards `tictactoe.grela.dev` to `tic-tac-toe-ai:8080` with the `grela.dev wildcard (CF Origin)` certificate, Force SSL, HTTP/2, and HSTS enabled.
 
 Install the reviewed files as root-owned deployment programs:
 

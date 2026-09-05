@@ -81,15 +81,15 @@ import urllib.request
 
 expected = sys.argv[1]
 for path in ("/", "/static/favicon.svg"):
-    with urllib.request.urlopen("http://127.0.0.1:8084" + path, timeout=5) as response:
+    with urllib.request.urlopen("http://127.0.0.1:8080" + path, timeout=5) as response:
         if response.status != 200:
             raise SystemExit(f"{path} returned {response.status}")
-with urllib.request.urlopen("http://127.0.0.1:8084/api/health", timeout=5) as response:
+with urllib.request.urlopen("http://127.0.0.1:8080/api/health", timeout=5) as response:
     health = json.load(response)
 if health.get("status") != "ok" or health.get("revision") != expected:
     raise SystemExit(f"unexpected health payload: {health}")
 request = urllib.request.Request(
-    "http://127.0.0.1:8084/api/move",
+    "http://127.0.0.1:8080/api/move",
     data=json.dumps({"board": [[0, 0, 0], [0, 0, 0], [0, 0, 0]], "algorithm": "rules", "seed": 1}).encode(),
     headers={"Content-Type": "application/json"},
 )
