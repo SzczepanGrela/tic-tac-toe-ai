@@ -130,12 +130,7 @@ def prepare_release(
 ) -> tuple[argparse.Namespace, list[tuple[str, str]]]:
     contract_path = tmp_path / "contract.json"
     contract_path.write_text(json.dumps(contract()), encoding="utf-8")
-    for name, value in {
-        "COOLIFY_READ_TOKEN": "read-token",
-        "COOLIFY_WRITE_TOKEN": "write-token",
-        "COOLIFY_DEPLOY_TOKEN": "deploy-token",
-    }.items():
-        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("COOLIFY_TOKEN", "deployment-token")
     monkeypatch.setattr(release, "CoolifyClient", lambda *args, **kwargs: client)
     monkeypatch.setattr(
         release,
@@ -163,15 +158,16 @@ def test_digest_tag_conversion_requires_an_immutable_digest() -> None:
 
 
 def test_coolify_client_accepts_an_origin_or_api_base_url() -> None:
-    tokens = release.Tokens("read", "write", "deploy")
-
-    origin = release.CoolifyClient("http://100.64.0.1:8000", tokens)
-    api_base = release.CoolifyClient("http://100.64.0.1:8000/api/v1/", tokens)
+    origin = release.CoolifyClient("http://100.64.0.1:8000", "token")
+    api_base = release.CoolifyClient(
+        "http://100.64.0.1:8000/api/v1/",
+        "token",
+    )
 
     assert origin.api_url == "http://100.64.0.1:8000/api/v1"
     assert api_base.api_url == origin.api_url
     with pytest.raises(release.ReleaseError, match="path"):
-        release.CoolifyClient("http://100.64.0.1:8000/admin", tokens)
+        release.CoolifyClient("http://100.64.0.1:8000/admin", "token")
 
 
 def test_configuration_drift_stops_before_any_mutation(tmp_path: Path) -> None:
