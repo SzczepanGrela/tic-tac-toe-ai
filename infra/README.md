@@ -1,60 +1,137 @@
-# Deployment notes
+# Production release notes
 
 ## Release contract
 
-Quality runs the complete Python matrix, training smoke suite, Playwright suite, image build, and Trivy scan. A push to `main` publishes exactly one image as `ghcr.io/szczepangrela/tic-tac-toe-ai:<full-commit-sha>`, with an SBOM, provenance, and GitHub artifact attestation. Production receives that immutable manifest digest; the VPS neither checks out Git nor rebuilds the image.
+Every pull request runs the Python test matrix, training smoke suite, browser suite,
+container build, container smoke test, and vulnerability scan. A push to `main`
+publishes one image as `ghcr.io/szczepangrela/tic-tac-toe-ai:<full-commit-sha>` with
+an SBOM, provenance, and a GitHub artifact attestation. Production receives the
+immutable manifest digest and never rebuilds the image.
 
-The image uses a digest-pinned Python base and the hash-locked `requirements-web.lock`. Its OCI `org.opencontainers.image.revision` label and `/api/health` response contain the full source commit. Production starts as a non-root user with a read-only filesystem, all Linux capabilities dropped, `no-new-privileges`, a 128-process limit, 1 CPU, 512 MiB RAM, and bounded Docker logs.
+The container smoke test starts that exact image with the production CPU and
+memory limits, `--cap-drop ALL`, and `--init`. It waits for the Dockerfile health
+check, then verifies the health payload and source revision, the main page, the
+favicon, and a real move request. Nothing is published to a host port during this
+test.
 
-Automated deployment is intentionally gated by the repository variable `PRODUCTION_DEPLOY_ENABLED`. Keep it set to `false` until GHCR visibility, the VPS scripts, and the pinned SSH host key are ready; set it to `true` only after the first image package is public.
+The image uses a digest-pinned Python base and the hash-locked
+`requirements-web.lock`. Its OCI `org.opencontainers.image.revision` label and
+`/api/health` response contain the full source commit. The Dockerfile health check
+runs `python -m web.healthcheck` inside the container. Coolify health checks remain
+disabled so Coolify does not replace that image-defined command; Docker still
+reports the resulting health state to Coolify.
 
-## GitHub configuration
+## Coolify application contract
 
-Repository secrets:
+[`coolify-production.json`](coolify-production.json) records the nonsecret fields
+that must match before a release may change production. The application is a
+Docker Image resource that exposes only container port `8080`, has no host port
+mapping and no persistent storage. Its `fqdn` supplies the public Traefik route;
+the newer `domains` field and custom labels remain empty. It uses these effective
+runtime settings:
 
-- `TS_CLIENT_ID`
-- `TS_AUDIENCE`
-- `SSH_PRIVATE_KEY`
-- `SSH_HOST`
-- `SSH_PORT`
-- `SSH_USER`
-- `SSH_KNOWN_HOSTS` — the independently verified `ssh-keyscan` line for the exact host and port, never collected inside CI
+- non-root user supplied by the image;
+- `--cap-drop ALL` and `--init`;
+- 1 CPU, 512 MiB memory, 128 MiB reservation, and no additional swap;
+- the Docker daemon's bounded `local` logs;
+- two retained application images and generated container names, which allow
+  Coolify rolling updates.
 
-The current Tailscale workload-identity subject remains branch based because this repository deliberately does not use a GitHub Environment yet:
+The current Coolify version does not apply an application PID limit or
+`no-new-privileges` through the Docker Image resource's custom option parser.
+Those settings are not claimed by the contract. The application is stateless, so
+an automated rollback cannot conflict with a database migration. Reuse of this
+release procedure for a stateful service requires a separate migration and
+rollback design.
 
-```text
-repo:SzczepanGrela@115424220/tic-tac-toe-ai@1013262916:ref:refs/heads/main
-```
+Coolify stores a digest as a tag in the form `sha256-<64 hex characters>`. The
+release program accepts only the standard `sha256:<64 hex characters>` form and
+performs the conversion itself.
 
-After the `Quality gate` check exists on GitHub, protect `main` with a ruleset that requires pull requests, requires the strict `Quality gate` status check, resolves review conversations, and blocks force pushes and deletion. Zero approving reviews is intentional for this single-maintainer repository.
+## Production workflow
 
-Enable Dependabot security updates, secret scanning, and push protection. Restrict allowed Actions to the publishers used by the pinned workflow files. All workflow references are full commit SHAs; Dependabot proposes future updates.
+The deployment job uses the protected GitHub environment `production`. Configure
+that environment with a required reviewer and allow deployments only from
+`main`. This is the operator approval gate for every automatic or manually
+selected release. The repository-level `production` concurrency group serializes
+deployments and does not cancel a run that is publishing or observing production.
 
-## VPS installation
+Environment variables:
 
-The application container listens on port `8080` inside `tictactoe-network`. Nginx Proxy Manager forwards `tictactoe.grela.dev` to `tic-tac-toe-ai:8080` with the `grela.dev wildcard (CF Origin)` certificate, Force SSL, HTTP/2, and HSTS enabled.
+- `COOLIFY_URL` — the private Coolify origin reachable through Tailscale; the
+  value may optionally end with `/api/v1`;
+- `COOLIFY_APPLICATION_UUID` — the production application UUID;
+- `PRODUCTION_URL` — `https://tictactoe.grela.dev`.
 
-Install the reviewed files as root-owned deployment programs:
+Environment secrets:
 
-```text
-infra/deploy-launcher.example.sh -> /usr/local/libexec/grela-deploy/tictactoe
-infra/deploy.sh                  -> /usr/local/libexec/grela-deploy/tictactoe-deploy
-```
+- `COOLIFY_READ_TOKEN` with `read` only;
+- `COOLIFY_WRITE_TOKEN` with `write` only;
+- `COOLIFY_DEPLOY_TOKEN` with `deploy` only;
+- `TS_CLIENT_ID` and `TS_AUDIENCE` for the short-lived Tailscale identity.
 
-Both files should be owned by `root:root` and executable but not writable by `tictactoe-app`. Keep the existing forced-command authorized-key entry pointed at `/usr/local/libexec/grela-deploy/tictactoe`. The launcher accepts only `deploy sha256:<64 lowercase hex>`; arbitrary shell commands and mutable tags are rejected.
+The three Coolify tokens must be distinct. Do not grant `read:sensitive` or
+`root`. Coolify tokens are scoped to a team rather than to one application, so
+the deployment job can still affect other resources in that team if its code is
+changed. A separate Coolify team or a narrow policy gateway is needed for strict
+per-application authorization.
 
-The public GHCR package lets the VPS pull by digest without a registry credential. The deployment starts a candidate alongside production, validates health, root, favicon, and a real move request, then renames the old container to `tic-tac-toe-ai-previous` and the candidate to `tic-tac-toe-ai`. NPM configuration is tested and reloaded before the public revision check. Existing traffic gets a drain interval; the old container is then stopped but retained for rollback. A failed promotion restores the previous name and reloads NPM. Only the application image older than the retained rollback release is removed; global Docker pruning is forbidden.
+Restrict the Tailscale workload tag to the Coolify API address and port. The
+Coolify API IP allowlist must also accept this workload identity. Verify both
+controls before enabling deployment; do not broaden either rule to the public
+internet.
 
-Peak application memory can reach roughly twice its steady-state limit during deployment. Steady state runs one active application container plus one stopped rollback container.
+The release proceeds as follows:
 
-The manual Deploy workflow accepts a previously attested digest and never rebuilds it. Automatic queued deployments compare their source revision with the current `main` head and skip stale releases.
+1. Validate the immutable digest, GitHub attestation, image revision label, and
+   freshness of an automatic `main` release.
+2. Connect to the private Coolify API using the short-lived Tailscale identity.
+3. Require an exact match with the checked-in Coolify contract and a healthy
+   production application, with no deployment already running for it.
+4. Record the current digest and public revision, smoke-test the current release,
+   and verify that the saved digest contains that revision label.
+5. Change only the image digest, read it back, submit one deployment request, and
+   track the exact deployment UUID returned by Coolify.
+6. During the rolling update, accept the previous or target revision from the
+   public health endpoint. Three consecutive failures cancel the deployment and
+   require a confirmed terminal state before rollback begins.
+7. After Coolify reports completion, require the target revision repeatedly,
+   rerun the complete public smoke test, and observe it for an additional window.
+8. On a failure with a known deployment state, restore the saved digest through
+   Coolify, deploy it, and verify the previous public revision and full smoke test.
 
-## Request path and client identity
+Read requests can be retried. Mutation requests are never blindly retried. If a
+deployment or cancellation response is uncertain, the workflow stops for manual
+reconciliation instead of risking two concurrent deployments. Manual workflow
+cancellation or runner failure can interrupt observation and automatic rollback;
+the operator must then inspect the exact Coolify deployment and current public
+revision before taking another action.
 
-The production request path is `visitor → Cloudflare → VPS firewall → Nginx Proxy Manager → application`. Rate limits and logs use the visitor IP, not a Cloudflare egress address or the NPM container address.
+The manual workflow accepts a previously attested digest and derives its revision
+from the image. It supports an operator-approved rollback without rebuilding an
+older commit. An automatic queued release is skipped if its source commit is no
+longer the current `main` head.
 
-Allow public origin traffic on `80/443` only from Cloudflare's current IPv4 and IPv6 ranges. Verify the effective `DOCKER-USER`/nftables path from an external non-Cloudflare host because Docker-published ports can bypass ordinary UFW handling on some systems. A direct connection to the origin IP must fail.
+The read-only contract and deployment-history calls were verified against the
+installed Coolify `4.3.14` API. Repeat the contract check and the controlled
+cancellation test after a Coolify upgrade before relying on automatic rollback.
 
-NPM accepts `CF-Connecting-IP` only from Cloudflare's published ranges and replaces upstream `X-Forwarded-For` with that canonical visitor address. The deployment discovers NPM's exact address on `tictactoe-network` and passes only that peer to Uvicorn. Do not restore `--forwarded-allow-ips *`, and do not add Cloudflare ranges to Uvicorn because Cloudflare does not connect directly to the application container.
+## Activation sequence
 
-Cloudflare and NPM provide edge/proxy rate limits in addition to the API token buckets. Human-versus-AI refills at 30 moves per minute with a burst of 10. AI series use a separate 30-game bucket, and each request costs its requested game count. Idle, fully refilled client entries are evicted so spoofed or rotating addresses cannot grow memory indefinitely. CPU-bound AI work runs in worker threads behind a two-job semaphore so health checks remain responsive.
+Keep the repository variable `PRODUCTION_DEPLOY_ENABLED` set to `false` while the
+new path is being reviewed. Before changing it:
+
+1. Create and protect the `production` environment.
+2. Move the five deployment secrets into that environment and set its three
+   nonsecret variables.
+3. Confirm the Tailscale ACL and Coolify API allowlist using the workflow identity.
+4. Exercise a successful deployment against the temporary isolated application.
+5. Exercise a controlled unhealthy candidate and confirm cancellation, rollback,
+   container cleanup, and the deployment history in Coolify.
+6. Run one manually approved production release and confirm its public revision.
+7. Enable automatic calls by setting `PRODUCTION_DEPLOY_ENABLED` to `true`.
+
+The older `deploy.sh` and forced-command launcher remain available only as a
+reviewed emergency fallback during this transition. The current workflow does not
+use SSH or Nginx Proxy Manager. Remove the legacy scripts, their deployment key,
+and their tests after the Coolify path has completed the activation sequence.
