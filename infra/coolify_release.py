@@ -31,31 +31,18 @@ class UncertainDeployment(ReleaseError):
     """A deployment request may have reached Coolify, so mutation must stop."""
 
 
-@dataclass(frozen=True)
-class Tokens:
-    read: str
-    write: str
-    deploy: str
-
-    @classmethod
-    def from_environment(cls) -> Tokens:
-        tokens = cls(
-            read=os.environ.get("COOLIFY_READ_TOKEN", ""),
-            write=os.environ.get("COOLIFY_WRITE_TOKEN", ""),
-            deploy=os.environ.get("COOLIFY_DEPLOY_TOKEN", ""),
-        )
-        if not all((tokens.read, tokens.write, tokens.deploy)):
-            raise ReleaseError("Coolify read, write, and deploy tokens are required")
-        if len({tokens.read, tokens.write, tokens.deploy}) != 3:
-            raise ReleaseError("Coolify permissions must use three distinct tokens")
-        return tokens
+def token_from_environment() -> str:
+    token = os.environ.get("COOLIFY_TOKEN", "")
+    if not token:
+        raise ReleaseError("Coolify deployment token is required")
+    return token
 
 
 class CoolifyClient:
     def __init__(
         self,
         base_url: str,
-        tokens: Tokens,
+        token: str,
         *,
         timeout: int = 15,
         read_attempts: int = 3,
@@ -74,7 +61,7 @@ class CoolifyClient:
             (parsed.scheme, parsed.netloc, "", "", "")
         ).rstrip("/")
         self.api_url = f"{origin}/api/v1"
-        self.tokens = tokens
+        self.token = token
         self.timeout = timeout
         self.read_attempts = read_attempts
 
@@ -82,7 +69,6 @@ class CoolifyClient:
         self,
         method: str,
         path: str,
-        token: str,
         body: Mapping[str, object] | None = None,
     ) -> object:
         data = None if body is None else json.dumps(body).encode()
@@ -91,7 +77,7 @@ class CoolifyClient:
             data=data,
             headers={
                 "Accept": "application/json",
-                "Authorization": f"Bearer {token}",
+                "Authorization": f"Bearer {self.token}",
                 **({"Content-Type": "application/json"} if data is not None else {}),
             },
             method=method,
@@ -133,7 +119,6 @@ class CoolifyClient:
         payload = self._request(
             "GET",
             f"/applications/{application_uuid}",
-            self.tokens.read,
         )
         if not isinstance(payload, Mapping):
             raise ReleaseError("Coolify returned an invalid application response")
@@ -146,7 +131,6 @@ class CoolifyClient:
         payload = self._request(
             "GET",
             f"/deployments/applications/{application_uuid}?take=20",
-            self.tokens.read,
         )
         if not isinstance(payload, Mapping):
             raise ReleaseError("Coolify returned an invalid deployment history")
@@ -162,7 +146,6 @@ class CoolifyClient:
             self._request(
                 "PATCH",
                 f"/applications/{application_uuid}",
-                self.tokens.write,
                 {"docker_registry_image_tag": tag},
             )
         except UncertainDeployment as mutation_error:
@@ -179,7 +162,6 @@ class CoolifyClient:
         payload = self._request(
             "POST",
             "/deploy",
-            self.tokens.deploy,
             {"uuid": application_uuid, "force": False},
         )
         if not isinstance(payload, Mapping):
@@ -207,7 +189,6 @@ class CoolifyClient:
         payload = self._request(
             "GET",
             f"/deployments/{deployment_uuid}",
-            self.tokens.read,
         )
         if not isinstance(payload, Mapping):
             raise ReleaseError("Coolify returned an invalid deployment status")
@@ -219,7 +200,6 @@ class CoolifyClient:
         self._request(
             "POST",
             f"/deployments/{deployment_uuid}/cancel",
-            self.tokens.deploy,
         )
 
 
@@ -572,7 +552,7 @@ def deploy_release(args: argparse.Namespace) -> None:
     if not isinstance(image_repository, str) or not image_repository:
         raise ReleaseError("Coolify contract has no image repository")
 
-    client = CoolifyClient(args.coolify_url, Tokens.from_environment())
+    client = CoolifyClient(args.coolify_url, token_from_environment())
     current = client.get_application(args.application_uuid)
     verify_application(current, contract, args.application_uuid)
     verify_no_running_deployment(client, args.application_uuid)

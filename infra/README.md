@@ -65,14 +65,14 @@ Environment variables:
 
 Environment secrets:
 
-- `COOLIFY_READ_TOKEN` with `read` only;
-- `COOLIFY_WRITE_TOKEN` with `write` only;
-- `COOLIFY_DEPLOY_TOKEN` with `deploy` only;
+- `COOLIFY_TOKEN` with `read`, `write`, and `deploy`, created only for this
+  repository's production deployment;
 - `TS_CLIENT_ID` and `TS_AUDIENCE` for the short-lived Tailscale identity.
 
-The three Coolify tokens must be distinct. Do not grant `read:sensitive` or
-`root`. Coolify tokens are scoped to a team rather than to one application, so
-the deployment job can still affect other resources in that team if its code is
+Do not grant `read:sensitive` or `root`. Keep a separate read-only token for
+operator and MCP audits; never reuse the deployment token for those tasks.
+Coolify tokens are scoped to a team rather than to one application, so the
+deployment job can still affect other resources in that team if its code is
 changed. A separate Coolify team or a narrow policy gateway is needed for strict
 per-application authorization.
 
@@ -122,7 +122,7 @@ Keep the repository variable `PRODUCTION_DEPLOY_ENABLED` set to `false` while th
 new path is being reviewed. Before changing it:
 
 1. Create and protect the `production` environment.
-2. Move the five deployment secrets into that environment and set its three
+2. Move the three deployment secrets into that environment and set its three
    nonsecret variables.
 3. Confirm the Tailscale ACL and Coolify API allowlist using the workflow identity.
 4. Exercise a successful deployment against the temporary isolated application.

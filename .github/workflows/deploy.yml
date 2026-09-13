@@ -115,17 +115,13 @@ jobs:
           COOLIFY_URL: ${{ vars.COOLIFY_URL }}
           COOLIFY_APPLICATION_UUID: ${{ vars.COOLIFY_APPLICATION_UUID }}
           PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
-          COOLIFY_READ_TOKEN: ${{ secrets.COOLIFY_READ_TOKEN }}
-          COOLIFY_WRITE_TOKEN: ${{ secrets.COOLIFY_WRITE_TOKEN }}
-          COOLIFY_DEPLOY_TOKEN: ${{ secrets.COOLIFY_DEPLOY_TOKEN }}
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
         run: |
           for value in \
             "$COOLIFY_URL" \
             "$COOLIFY_APPLICATION_UUID" \
             "$PRODUCTION_URL" \
-            "$COOLIFY_READ_TOKEN" \
-            "$COOLIFY_WRITE_TOKEN" \
-            "$COOLIFY_DEPLOY_TOKEN"; do
+            "$COOLIFY_TOKEN"; do
             test -n "$value"
           done
       - name: Deploy through Coolify and verify production
@@ -135,9 +131,7 @@ jobs:
           COOLIFY_URL: ${{ vars.COOLIFY_URL }}
           COOLIFY_APPLICATION_UUID: ${{ vars.COOLIFY_APPLICATION_UUID }}
           PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
-          COOLIFY_READ_TOKEN: ${{ secrets.COOLIFY_READ_TOKEN }}
-          COOLIFY_WRITE_TOKEN: ${{ secrets.COOLIFY_WRITE_TOKEN }}
-          COOLIFY_DEPLOY_TOKEN: ${{ secrets.COOLIFY_DEPLOY_TOKEN }}
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
         run: |
           python -m infra.coolify_release \
             --coolify-url "$COOLIFY_URL" \
