@@ -33,7 +33,7 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-web.txt
       - run: python -m pip install -r requirements-web.txt pytest pytest-cov httpx
-      - run: python -m compileall -q ai game training web
+      - run: python -m compileall -q ai game training web infra
       - run: >-
           python -m pytest --ignore=tests/test_e2e.py
           --cov=ai --cov=game --cov=web --cov-report=term-missing
@@ -113,10 +113,59 @@ jobs:
           sbom: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Select the exact tested image
+        id: tested-image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF" == refs/heads/main ]]; then
+            echo "ref=${IMAGE_NAME}@${DIGEST}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${IMAGE_NAME}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Smoke-test the exact image
+        env:
+          IMAGE_REF: ${{ steps.tested-image.outputs.ref }}
+        run: |
+          container_name="tic-tac-toe-smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            docker rm --force "$container_name" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          docker run --detach \
+            --name "$container_name" \
+            --cap-drop ALL \
+            --init \
+            --cpus 1 \
+            --memory 512m \
+            --memory-reservation 128m \
+            --memory-swap 512m \
+            "$IMAGE_REF" >/dev/null
+
+          health=starting
+          for _ in {1..60}; do
+            health="$(docker inspect --format '{{.State.Health.Status}}' "$container_name")"
+            if [[ "$health" == healthy ]]; then
+              break
+            fi
+            if [[ "$health" == unhealthy ]]; then
+              break
+            fi
+            sleep 2
+          done
+          if [[ "$health" != healthy ]]; then
+            docker logs "$container_name"
+            echo "Container health status is $health." >&2
+            exit 1
+          fi
+
+          docker exec "$container_name" \
+            python -m web.smokecheck --expected-revision "$GITHUB_SHA"
       - name: Scan fixable high and critical vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && format('{0}@{1}', env.IMAGE_NAME, steps.build.outputs.digest) || format('{0}:{1}', env.IMAGE_NAME, github.sha) }}
+          image-ref: ${{ steps.tested-image.outputs.ref }}
           format: table
           exit-code: "1"
           ignore-unfixed: true
@@ -162,4 +211,3 @@ jobs:
     with:
       digest: ${{ needs.container.outputs.digest }}
       expected_revision: ${{ github.sha }}
-    secrets: inherit

@@ -1,0 +1,31 @@
+{
+  "name": "tic-tac-toe-ai",
+  "build_pack": "dockerimage",
+  "docker_registry_image_name": "ghcr.io/szczepangrela/tic-tac-toe-ai",
+  "fqdn": "https://tictactoe.grela.dev:8080/",
+  "domains": null,
+  "redirect": "both",
+  "ports_exposes": "8080",
+  "ports_mappings": null,
+  "health_check_enabled": false,
+  "custom_labels": null,
+  "custom_network_aliases": null,
+  "destination_type": "App\\Models\\StandaloneDocker",
+  "destination_id": 1,
+  "max_restart_count": 10,
+  "limits_memory": "512m",
+  "limits_memory_swap": "512m",
+  "limits_memory_swappiness": 0,
+  "limits_memory_reservation": "128m",
+  "limits_cpus": "1",
+  "limits_cpu_shares": 1024,
+  "custom_docker_run_options": "--cap-drop ALL --init",
+  "settings": {
+    "connect_to_docker_network": false,
+    "docker_images_to_keep": 2,
+    "is_consistent_container_name_enabled": false,
+    "is_container_label_readonly_enabled": true,
+    "is_force_https_enabled": false,
+    "stop_grace_period": null
+  }
+}

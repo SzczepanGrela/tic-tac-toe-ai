@@ -17,6 +17,11 @@ on:
         description: "Previously attested digest (sha256:...)"
         required: true
         type: string
+      expected_revision:
+        description: "Optional full commit SHA; leave empty to use the image label"
+        required: false
+        default: ""
+        type: string
 
 permissions: {}
 
@@ -28,14 +33,16 @@ env:
   IMAGE_NAME: ghcr.io/szczepangrela/tic-tac-toe-ai
 
 jobs:
-  deploy:
-    name: Production
+  preflight:
+    name: Verify release
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     permissions:
       attestations: read
       contents: read
-      id-token: write
+    outputs:
+      deploy: ${{ steps.freshness.outputs.deploy }}
+      revision: ${{ steps.image.outputs.revision }}
     steps:
       - name: Validate immutable digest
         env:
@@ -82,40 +89,59 @@ jobs:
             fi
           fi
           echo "deploy=$deploy" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: Production
+    needs: preflight
+    if: needs.preflight.outputs.deploy == 'true'
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_URL }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Connect to Tailscale
-        if: steps.freshness.outputs.deploy == 'true'
         uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8 # v4
         with:
           oauth-client-id: ${{ secrets.TS_CLIENT_ID }}
           audience: ${{ secrets.TS_AUDIENCE }}
           tags: tag:ci-vps
-      - name: Configure pinned SSH host identity
-        if: steps.freshness.outputs.deploy == 'true'
+      - name: Validate production configuration
         env:
-          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          COOLIFY_URL: ${{ vars.COOLIFY_URL }}
+          COOLIFY_APPLICATION_UUID: ${{ vars.COOLIFY_APPLICATION_UUID }}
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+          COOLIFY_READ_TOKEN: ${{ secrets.COOLIFY_READ_TOKEN }}
+          COOLIFY_WRITE_TOKEN: ${{ secrets.COOLIFY_WRITE_TOKEN }}
+          COOLIFY_DEPLOY_TOKEN: ${{ secrets.COOLIFY_DEPLOY_TOKEN }}
         run: |
-          install -d -m 700 ~/.ssh
-          install -m 600 /dev/null ~/.ssh/deploy_key
-          install -m 600 /dev/null ~/.ssh/known_hosts
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
-          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          test -s ~/.ssh/deploy_key
-          test -s ~/.ssh/known_hosts
-      - name: Deploy and verify exact digest
-        if: steps.freshness.outputs.deploy == 'true'
+          for value in \
+            "$COOLIFY_URL" \
+            "$COOLIFY_APPLICATION_UUID" \
+            "$PRODUCTION_URL" \
+            "$COOLIFY_READ_TOKEN" \
+            "$COOLIFY_WRITE_TOKEN" \
+            "$COOLIFY_DEPLOY_TOKEN"; do
+            test -n "$value"
+          done
+      - name: Deploy through Coolify and verify production
         env:
           DIGEST: ${{ inputs.digest }}
-          SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_PORT: ${{ secrets.SSH_PORT }}
-          SSH_USER: ${{ secrets.SSH_USER }}
+          EXPECTED_REVISION: ${{ needs.preflight.outputs.revision }}
+          COOLIFY_URL: ${{ vars.COOLIFY_URL }}
+          COOLIFY_APPLICATION_UUID: ${{ vars.COOLIFY_APPLICATION_UUID }}
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+          COOLIFY_READ_TOKEN: ${{ secrets.COOLIFY_READ_TOKEN }}
+          COOLIFY_WRITE_TOKEN: ${{ secrets.COOLIFY_WRITE_TOKEN }}
+          COOLIFY_DEPLOY_TOKEN: ${{ secrets.COOLIFY_DEPLOY_TOKEN }}
         run: |
-          ssh \
-            -i ~/.ssh/deploy_key \
-            -p "$SSH_PORT" \
-            -o BatchMode=yes \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            -o UserKnownHostsFile=~/.ssh/known_hosts \
-            "$SSH_USER@$SSH_HOST" \
-            "deploy $DIGEST"
+          python -m infra.coolify_release \
+            --coolify-url "$COOLIFY_URL" \
+            --application-uuid "$COOLIFY_APPLICATION_UUID" \
+            --public-url "$PRODUCTION_URL" \
+            --digest "$DIGEST" \
+            --expected-revision "$EXPECTED_REVISION"
