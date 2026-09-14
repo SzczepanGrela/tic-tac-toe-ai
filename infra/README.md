@@ -116,6 +116,24 @@ The read-only contract and deployment-history calls were verified against the
 installed Coolify `4.3.14` API. Repeat the contract check and the controlled
 cancellation test after a Coolify upgrade before relying on automatic rollback.
 
+The manual `Validate deployment safety` workflow performs that cancellation test
+only on an isolated application. Before changing anything, it requires the exact
+application name, no FQDN, no host port mapping, the expected stable digest, a
+healthy state, and a UUID different from production. It builds a short-lived
+candidate whose Docker health check always fails, waits until Coolify is actively
+deploying it, cancels that exact deployment UUID, confirms a terminal cancelled
+state, restores the saved digest through a second deployment, and requires the
+isolated application to become healthy again. The candidate has no artifact
+attestation, so the production workflow rejects it, and its GHCR version is
+deleted after a successful validation.
+
+The workflow uses the `production` GitHub environment because that environment
+holds the Coolify and Tailscale credentials. Its job is still serialized with
+production and requires the same operator approval. The hard UUID inequality and
+the isolated application contract prevent it from targeting the production
+application. After the run, verify on the host that Coolify removed the cancelled
+candidate container before deleting the temporary application.
+
 ## Activation sequence
 
 Keep the repository variable `PRODUCTION_DEPLOY_ENABLED` set to `false` while the
@@ -126,8 +144,9 @@ new path is being reviewed. Before changing it:
    nonsecret variables.
 3. Confirm the Tailscale ACL and Coolify API allowlist using the workflow identity.
 4. Exercise a successful deployment against the temporary isolated application.
-5. Exercise a controlled unhealthy candidate and confirm cancellation, rollback,
-   container cleanup, and the deployment history in Coolify.
+5. Run `Validate deployment safety` with the isolated application's current
+   digest. Confirm cancellation and restoration in its summary and deployment
+   history, then confirm candidate container cleanup on the host.
 6. Run one manually approved production release and confirm its public revision.
 7. Enable automatic calls by setting `PRODUCTION_DEPLOY_ENABLED` to `true`.
 

@@ -1,0 +1,7 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+# This image is used only by the manually approved deployment safety check.
+# The service keeps running, while Docker can never mark the candidate healthy.
+HEALTHCHECK --interval=5s --timeout=2s --start-period=0s --retries=120 \
+  CMD ["python", "-c", "raise SystemExit(1)"]
