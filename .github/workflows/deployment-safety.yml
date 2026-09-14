@@ -98,13 +98,15 @@ jobs:
             --candidate-digest "$CANDIDATE_DIGEST"
       - name: Remove the validation image from GHCR
         env:
-          CANDIDATE_TAG: deployment-safety-${{ github.run_id }}-${{ github.run_attempt }}
+          CANDIDATE_TAG_PREFIX: deployment-safety-
           GH_TOKEN: ${{ github.token }}
         run: |
           package_name="${GITHUB_REPOSITORY#*/}"
           versions="$(gh api "/users/${GITHUB_REPOSITORY_OWNER}/packages/container/${package_name}/versions?per_page=100")"
-          version_id="$(jq -er --arg tag "$CANDIDATE_TAG" \
-            'map(select(.metadata.container.tags | index($tag))) | if length == 1 then .[0].id else error("validation image version is not unique") end' \
+          version_ids="$(jq -er --arg prefix "$CANDIDATE_TAG_PREFIX" \
+            '[.[] | select(any(.metadata.container.tags[]?; startswith($prefix))) | .id] | if length > 0 then .[] else error("no validation image version found") end' \
             <<<"$versions")"
-          gh api --method DELETE \
-            "/users/${GITHUB_REPOSITORY_OWNER}/packages/container/${package_name}/versions/${version_id}"
+          while IFS= read -r version_id; do
+            gh api --method DELETE \
+              "/users/${GITHUB_REPOSITORY_OWNER}/packages/container/${package_name}/versions/${version_id}"
+          done <<<"$version_ids"

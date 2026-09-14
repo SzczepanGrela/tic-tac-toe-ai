@@ -26,7 +26,13 @@ class FakeClient:
             "docker_registry_image_name": safety.IMAGE_REPOSITORY,
             "docker_registry_image_tag": release.digest_to_tag(STABLE_DIGEST),
             "build_pack": "dockerimage",
-            "health_check_enabled": False,
+            "health_check_enabled": True,
+            "health_check_type": "cmd",
+            "health_check_command": safety.HEALTHCHECK_COMMAND,
+            "health_check_interval": 5,
+            "health_check_timeout": 5,
+            "health_check_retries": 10,
+            "health_check_start_period": 10,
             "status": "running:healthy",
         }
         self.queued: list[str] = []

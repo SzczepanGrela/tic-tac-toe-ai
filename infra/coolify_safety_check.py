@@ -22,6 +22,7 @@ from infra.coolify_release import (
 
 CANARY_NAME = "tictactoe-deployment-canary"
 IMAGE_REPOSITORY = "ghcr.io/szczepangrela/tic-tac-toe-ai"
+HEALTHCHECK_COMMAND = "python -m web.healthcheck"
 
 
 def verify_isolated_canary(
@@ -40,7 +41,13 @@ def verify_isolated_canary(
         "docker_registry_image_name": IMAGE_REPOSITORY,
         "docker_registry_image_tag": stable_tag,
         "build_pack": "dockerimage",
-        "health_check_enabled": False,
+        "health_check_enabled": True,
+        "health_check_type": "cmd",
+        "health_check_command": HEALTHCHECK_COMMAND,
+        "health_check_interval": 5,
+        "health_check_timeout": 5,
+        "health_check_retries": 10,
+        "health_check_start_period": 10,
         "status": "running:healthy",
     }
     mismatches = [key for key, value in expected.items() if application.get(key) != value]
