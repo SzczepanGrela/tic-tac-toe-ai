@@ -119,13 +119,15 @@ cancellation test after a Coolify upgrade before relying on automatic rollback.
 The manual `Validate deployment safety` workflow performs that cancellation test
 only on an isolated application. Before changing anything, it requires the exact
 application name, no FQDN, no host port mapping, the expected stable digest, a
-healthy state, and a UUID different from production. It builds a short-lived
-candidate whose Docker health check always fails, waits until Coolify is actively
-deploying it, cancels that exact deployment UUID, confirms a terminal cancelled
-state, restores the saved digest through a second deployment, and requires the
-isolated application to become healthy again. The candidate has no artifact
-attestation, so the production workflow rejects it, and its GHCR version is
-deleted after a successful validation.
+healthy state, the enabled Coolify CMD health check `python -m web.healthcheck`
+with its expected timings, and a UUID different from production. It builds a
+short-lived candidate in which that module always fails, waits until Coolify is
+actively deploying it, cancels that exact deployment UUID, confirms a terminal
+cancelled state, restores the saved digest through a second deployment, and
+requires the isolated application to become healthy again. The candidate has no
+artifact attestation, so the production workflow rejects it. After a successful
+validation, the cleanup step deletes every GHCR version created by this workflow,
+including versions retained after an earlier failed run.
 
 The workflow uses the `production` GitHub environment because that environment
 holds the Coolify and Tailscale credentials. Its job is still serialized with
