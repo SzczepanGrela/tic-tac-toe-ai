@@ -17,9 +17,11 @@ test.
 The image uses a digest-pinned Python base and the hash-locked
 `requirements-web.lock`. Its OCI `org.opencontainers.image.revision` label and
 `/api/health` response contain the full source commit. The Dockerfile health check
-runs `python -m web.healthcheck` inside the container. Coolify health checks remain
-disabled so Coolify does not replace that image-defined command; Docker still
-reports the resulting health state to Coolify.
+runs `python -m web.healthcheck` inside the container and remains the portable
+default for runtimes outside Coolify. The Coolify application enables a managed
+CMD health check with the same command. Docker executes the effective check inside
+the container, while Coolify waits for Docker to report the new container as
+healthy before completing a rolling update and removing the previous container.
 
 ## Coolify application contract
 
@@ -33,6 +35,8 @@ runtime settings:
 - non-root user supplied by the image;
 - `--cap-drop ALL` and `--init`;
 - 1 CPU, 512 MiB memory, 128 MiB reservation, and no additional swap;
+- a managed CMD health check using `python -m web.healthcheck`, with a 5-second
+  interval, 5-second timeout, 10 retries, and a 10-second start period;
 - the Docker daemon's bounded `local` logs;
 - two retained application images and generated container names, which allow
   Coolify rolling updates.
@@ -146,11 +150,16 @@ new path is being reviewed. Before changing it:
    nonsecret variables.
 3. Confirm the Tailscale ACL and Coolify API allowlist using the workflow identity.
 4. Exercise a successful deployment against the temporary isolated application.
-5. Run `Validate deployment safety` with the isolated application's current
+5. Enable on that application the managed CMD health check recorded in the
+   production contract, redeploy its stable digest, and confirm that Coolify waits
+   for the container to become healthy.
+6. Run `Validate deployment safety` with the isolated application's current
    digest. Confirm cancellation and restoration in its summary and deployment
    history, then confirm candidate container cleanup on the host.
-6. Run one manually approved production release and confirm its public revision.
-7. Enable automatic calls by setting `PRODUCTION_DEPLOY_ENABLED` to `true`.
+7. Apply the same health-check settings to production and run one manually
+   approved production release. Confirm its effective Docker health check and
+   public revision.
+8. Enable automatic calls by setting `PRODUCTION_DEPLOY_ENABLED` to `true`.
 
 The older `deploy.sh` and forced-command launcher remain available only as a
 reviewed emergency fallback during this transition. The current workflow does not
