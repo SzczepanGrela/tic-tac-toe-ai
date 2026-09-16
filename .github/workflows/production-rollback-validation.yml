@@ -1,0 +1,38 @@
+name: Validate production rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      digest:
+        description: New attested digest to deploy temporarily
+        required: true
+        type: string
+      expected_revision:
+        description: Current main commit stored in the target image
+        required: true
+        type: string
+      expected_previous_digest:
+        description: Exact production digest that must be restored
+        required: true
+        type: string
+      expected_previous_revision:
+        description: Exact production revision that must be restored
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  validate:
+    name: Controlled public-smoke rollback
+    permissions:
+      attestations: read
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/deploy.yml
+    with:
+      digest: ${{ inputs.digest }}
+      expected_revision: ${{ inputs.expected_revision }}
+      rollback_validation: true
+      expected_previous_digest: ${{ inputs.expected_previous_digest }}
+      expected_previous_revision: ${{ inputs.expected_previous_revision }}

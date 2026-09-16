@@ -159,7 +159,16 @@ new path is being reviewed. Before changing it:
 7. Apply the same health-check settings to production and run one manually
    approved production release. Confirm its effective Docker health check and
    public revision.
-8. Enable automatic calls by setting `PRODUCTION_DEPLOY_ENABLED` to `true`.
+8. Run the temporary `Validate production rollback` workflow with a new attested
+   digest and the exact current production digest/revision. It first proves the
+   new release with the real public smoke test, then deliberately checks an
+   impossible revision without making the application itself unhealthy. Treat
+   the run as successful only when the previous digest is restored and its
+   revision, health, routes and full smoke test pass. An unrelated endpoint
+   failure makes the workflow fail even if recovery succeeds. As with a normal
+   release, runner or workflow cancellation can interrupt automatic rollback;
+   monitor the approved run until its terminal state.
+9. Enable automatic calls by setting `PRODUCTION_DEPLOY_ENABLED` to `true`.
 
 The older `deploy.sh` and forced-command launcher remain available only as a
 reviewed emergency fallback during this transition. The current workflow does not
