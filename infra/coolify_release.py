@@ -281,6 +281,30 @@ def verify_no_running_deployment(
         raise ReleaseError("another Coolify deployment is already running")
 
 
+def wait_for_healthy_application(
+    client: CoolifyClient,
+    application_uuid: str,
+    contract: Mapping[str, object],
+    expected_tag: str,
+    *,
+    attempts: int,
+    interval: float,
+) -> None:
+    for _ in range(attempts):
+        application = client.get_application(application_uuid)
+        verify_application(
+            application,
+            contract,
+            application_uuid,
+            expected_tag=expected_tag,
+            require_healthy=False,
+        )
+        if application.get("status") == "running:healthy":
+            return
+        time.sleep(interval)
+    raise ReleaseError("production did not report healthy after deployment")
+
+
 def verify_image_revision(image: str, revision: str) -> None:
     try:
         subprocess.run(
@@ -507,6 +531,7 @@ def rollback(
     *,
     timeout: int,
     interval: float,
+    health_attempts: int,
 ) -> str:
     print("Restoring the previous production digest.", file=sys.stderr)
     client.update_tag(application_uuid, previous_tag)
@@ -534,12 +559,13 @@ def rollback(
         interval=interval,
         attempts=30,
     )
-    restored = client.get_application(application_uuid)
-    verify_application(
-        restored,
-        contract,
+    wait_for_healthy_application(
+        client,
         application_uuid,
-        expected_tag=previous_tag,
+        contract,
+        previous_tag,
+        attempts=health_attempts,
+        interval=interval,
     )
     check_public_release(public_url, previous_revision)
     return rollback_uuid
@@ -604,12 +630,13 @@ def deploy_release(args: argparse.Namespace) -> None:
             timeout=args.deployment_timeout,
             interval=args.poll_interval,
         )
-        deployed = client.get_application(args.application_uuid)
-        verify_application(
-            deployed,
-            contract,
+        wait_for_healthy_application(
+            client,
             args.application_uuid,
-            expected_tag=target_tag,
+            contract,
+            target_tag,
+            attempts=args.settle_attempts,
+            interval=args.poll_interval,
         )
         wait_for_revision(
             args.public_url,
@@ -641,6 +668,7 @@ def deploy_release(args: argparse.Namespace) -> None:
                 args.public_url,
                 timeout=args.deployment_timeout,
                 interval=args.poll_interval,
+                health_attempts=args.settle_attempts,
             )
         except Exception as rollback_error:
             raise ReleaseError(

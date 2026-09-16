@@ -241,6 +241,85 @@ def test_successful_rollout_verifies_and_smoke_tests_exact_revisions(
     assert smoke_revisions == [OLD_REVISION, NEW_REVISION]
 
 
+def test_successful_rollout_waits_for_delayed_application_health(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class DelayedHealthClient(FakeClient):
+        delay_health = False
+        delayed_health_reads = 0
+
+        def get_deployment(self, deployment_uuid: str) -> dict[str, object]:
+            deployment = super().get_deployment(deployment_uuid)
+            if (
+                deployment["status"] == "finished"
+                and self.application["docker_registry_image_tag"]
+                == release.digest_to_tag(NEW_DIGEST)
+            ):
+                self.delay_health = True
+            return deployment
+
+        def get_application(self, application_uuid: str) -> dict[str, object]:
+            application = super().get_application(application_uuid)
+            if self.delay_health and self.delayed_health_reads == 0:
+                application["status"] = "running:starting"
+                self.delayed_health_reads += 1
+            return application
+
+    client = DelayedHealthClient(contract(), [["queued", "finished"]])
+    args, _ = prepare_release(monkeypatch, tmp_path, client)
+    monkeypatch.setattr(release.smokecheck, "check_release", lambda *args: None)
+
+    release.deploy_release(args)
+
+    assert client.delayed_health_reads == 1
+    assert client.updates == [release.digest_to_tag(NEW_DIGEST)]
+    assert client.queued == [DEPLOYMENT_UUID]
+
+
+def test_finished_but_persistently_unhealthy_rollout_is_rolled_back(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class PersistentlyUnhealthyClient(FakeClient):
+        target_finished = False
+
+        def get_deployment(self, deployment_uuid: str) -> dict[str, object]:
+            deployment = super().get_deployment(deployment_uuid)
+            if (
+                deployment_uuid == DEPLOYMENT_UUID
+                and deployment["status"] == "finished"
+            ):
+                self.target_finished = True
+            return deployment
+
+        def get_application(self, application_uuid: str) -> dict[str, object]:
+            application = super().get_application(application_uuid)
+            if (
+                self.target_finished
+                and application["docker_registry_image_tag"]
+                == release.digest_to_tag(NEW_DIGEST)
+            ):
+                application["status"] = "running:unhealthy"
+            return application
+
+    client = PersistentlyUnhealthyClient(
+        contract(),
+        [["queued", "finished"], ["queued", "finished"]],
+    )
+    args, _ = prepare_release(monkeypatch, tmp_path, client)
+    monkeypatch.setattr(release.smokecheck, "check_release", lambda *args: None)
+
+    with pytest.raises(release.ReleaseError, match="rollback"):
+        release.deploy_release(args)
+
+    assert client.updates == [
+        release.digest_to_tag(NEW_DIGEST),
+        release.digest_to_tag(OLD_DIGEST),
+    ]
+    assert client.queued == [DEPLOYMENT_UUID, ROLLBACK_UUID]
+
+
 def test_failed_candidate_deployment_restores_the_previous_digest(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
