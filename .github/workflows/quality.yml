@@ -208,6 +208,7 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/deploy.yml
+    secrets: inherit
     with:
       digest: ${{ needs.container.outputs.digest }}
       expected_revision: ${{ github.sha }}
