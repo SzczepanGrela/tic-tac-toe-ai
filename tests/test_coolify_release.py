@@ -120,9 +120,6 @@ def arguments(contract_path: Path) -> argparse.Namespace:
         public_url="https://tictactoe.example",
         digest=NEW_DIGEST,
         expected_revision=NEW_REVISION,
-        rollback_validation_confirmation=None,
-        expected_previous_digest=None,
-        expected_previous_revision=None,
         contract=contract_path,
         deployment_timeout=2,
         poll_interval=0.001,
@@ -349,98 +346,6 @@ def test_failed_candidate_deployment_restores_the_previous_digest(
     assert client.queued == [DEPLOYMENT_UUID, ROLLBACK_UUID]
     assert client.live_revision == OLD_REVISION
     assert smoke_revisions == [OLD_REVISION, OLD_REVISION]
-
-
-def test_controlled_public_smoke_failure_restores_the_previous_release(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    client = FakeClient(
-        contract(),
-        [["queued", "finished"], ["queued", "finished"]],
-    )
-    args, _ = prepare_release(monkeypatch, tmp_path, client)
-    args.rollback_validation_confirmation = release.ROLLBACK_VALIDATION_CONFIRMATION
-    args.expected_previous_digest = OLD_DIGEST
-    args.expected_previous_revision = OLD_REVISION
-    smoke_revisions: list[str] = []
-
-    def check_release(base_url: str, revision: str) -> None:
-        smoke_revisions.append(revision)
-        if revision not in {OLD_REVISION, NEW_REVISION}:
-            raise ValueError("health revision does not match the expected release")
-
-    monkeypatch.setattr(release.smokecheck, "check_release", check_release)
-    summary_path = tmp_path / "summary.md"
-    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_path))
-
-    release.deploy_release(args)
-
-    assert client.updates == [
-        release.digest_to_tag(NEW_DIGEST),
-        release.digest_to_tag(OLD_DIGEST),
-    ]
-    assert client.queued == [DEPLOYMENT_UUID, ROLLBACK_UUID]
-    assert client.live_revision == OLD_REVISION
-    assert smoke_revisions == [
-        OLD_REVISION,
-        NEW_REVISION,
-        "0" * 40,
-        OLD_REVISION,
-    ]
-    summary = summary_path.read_text(encoding="utf-8")
-    assert f"Target deployment: {DEPLOYMENT_UUID}" in summary
-    assert f"Rollback deployment: {ROLLBACK_UUID}" in summary
-    assert f"Restored digest: {OLD_DIGEST}" in summary
-
-
-def test_rollback_validation_rejects_an_unexpected_starting_digest(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    client = FakeClient(contract(), [["queued", "finished"]])
-    args, _ = prepare_release(monkeypatch, tmp_path, client)
-    args.rollback_validation_confirmation = release.ROLLBACK_VALIDATION_CONFIRMATION
-    args.expected_previous_digest = f"sha256:{'9' * 64}"
-    args.expected_previous_revision = OLD_REVISION
-    monkeypatch.setattr(release.smokecheck, "check_release", lambda *args: None)
-
-    with pytest.raises(release.ReleaseError, match="starting digest"):
-        release.deploy_release(args)
-
-    assert client.updates == []
-    assert client.queued == []
-
-
-def test_unexpected_public_failure_is_not_accepted_as_rollback_validation(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    client = FakeClient(
-        contract(),
-        [["queued", "finished"], ["queued", "finished"]],
-    )
-    args, _ = prepare_release(monkeypatch, tmp_path, client)
-    args.rollback_validation_confirmation = release.ROLLBACK_VALIDATION_CONFIRMATION
-    args.expected_previous_digest = OLD_DIGEST
-    args.expected_previous_revision = OLD_REVISION
-
-    def check_release(base_url: str, revision: str) -> None:
-        if revision not in {OLD_REVISION, NEW_REVISION}:
-            raise ValueError("request returned HTTP 503")
-
-    monkeypatch.setattr(release.smokecheck, "check_release", check_release)
-
-    with pytest.raises(release.ReleaseError, match="rollback") as error:
-        release.deploy_release(args)
-
-    assert "unexpected public smoke failure" in str(error.value)
-    assert client.live_revision == OLD_REVISION
-    assert client.updates == [
-        release.digest_to_tag(NEW_DIGEST),
-        release.digest_to_tag(OLD_DIGEST),
-    ]
-    assert client.queued == [DEPLOYMENT_UUID, ROLLBACK_UUID]
 
 
 def test_uncertain_deployment_request_does_not_attempt_a_second_mutation(

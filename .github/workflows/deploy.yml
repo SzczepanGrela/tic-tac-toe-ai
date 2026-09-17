@@ -11,21 +11,6 @@ on:
         description: Commit expected in the image revision label
         required: true
         type: string
-      rollback_validation:
-        description: Trigger the reviewed public-smoke rollback validation
-        required: false
-        default: false
-        type: boolean
-      expected_previous_digest:
-        description: Exact production digest required before rollback validation
-        required: false
-        default: ""
-        type: string
-      expected_previous_revision:
-        description: Exact production revision required before rollback validation
-        required: false
-        default: ""
-        type: string
   workflow_dispatch:
     inputs:
       digest:
@@ -62,27 +47,10 @@ jobs:
       - name: Validate immutable digest
         env:
           DIGEST: ${{ inputs.digest }}
-          EXPECTED_PREVIOUS_DIGEST: ${{ inputs.expected_previous_digest }}
-          EXPECTED_PREVIOUS_REVISION: ${{ inputs.expected_previous_revision }}
-          ROLLBACK_VALIDATION: ${{ inputs.rollback_validation }}
         run: |
           if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
             echo "Invalid image digest." >&2
             exit 64
-          fi
-          if [[ "$ROLLBACK_VALIDATION" == true ]]; then
-            if [[ ! "$EXPECTED_PREVIOUS_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-              echo "Invalid expected previous digest." >&2
-              exit 64
-            fi
-            if [[ ! "$EXPECTED_PREVIOUS_REVISION" =~ ^[0-9a-f]{40}$ ]]; then
-              echo "Invalid expected previous revision." >&2
-              exit 64
-            fi
-            if [[ "$DIGEST" == "$EXPECTED_PREVIOUS_DIGEST" ]]; then
-              echo "Rollback validation requires a new target digest." >&2
-              exit 64
-            fi
           fi
       - name: Verify GitHub artifact attestation
         env:
@@ -164,22 +132,10 @@ jobs:
           COOLIFY_APPLICATION_UUID: ${{ vars.COOLIFY_APPLICATION_UUID }}
           PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
-          ROLLBACK_VALIDATION: ${{ inputs.rollback_validation }}
-          EXPECTED_PREVIOUS_DIGEST: ${{ inputs.expected_previous_digest }}
-          EXPECTED_PREVIOUS_REVISION: ${{ inputs.expected_previous_revision }}
         run: |
-          validation_args=()
-          if [[ "$ROLLBACK_VALIDATION" == true ]]; then
-            validation_args=(
-              --rollback-validation-confirmation restore-after-controlled-public-smoke-failure
-              --expected-previous-digest "$EXPECTED_PREVIOUS_DIGEST"
-              --expected-previous-revision "$EXPECTED_PREVIOUS_REVISION"
-            )
-          fi
           python -m infra.coolify_release \
             --coolify-url "$COOLIFY_URL" \
             --application-uuid "$COOLIFY_APPLICATION_UUID" \
             --public-url "$PRODUCTION_URL" \
             --digest "$DIGEST" \
-            --expected-revision "$EXPECTED_REVISION" \
-            "${validation_args[@]}"
+            --expected-revision "$EXPECTED_REVISION"

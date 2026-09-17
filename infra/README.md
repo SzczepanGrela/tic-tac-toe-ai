@@ -117,58 +117,21 @@ older commit. An automatic queued release is skipped if its source commit is no
 longer the current `main` head.
 
 The read-only contract and deployment-history calls were verified against the
-installed Coolify `4.3.14` API. Repeat the contract check and the controlled
-cancellation test after a Coolify upgrade before relying on automatic rollback.
+installed Coolify `4.3.14` API. Before relying on changed behavior after a
+Coolify upgrade, prepare a new isolated acceptance plan and repeat the relevant
+contract, cancellation, restoration, rolling-capacity, and public rollback
+checks.
 
-The manual `Validate deployment safety` workflow performs that cancellation test
-only on an isolated application. Before changing anything, it requires the exact
-application name, no FQDN, no host port mapping, the expected stable digest, a
-healthy state, the enabled Coolify CMD health check `python -m web.healthcheck`
-with its expected timings, and a UUID different from production. It builds a
-short-lived candidate in which that module always fails, waits until Coolify is
-actively deploying it, cancels that exact deployment UUID, confirms a terminal
-cancelled state, restores the saved digest through a second deployment, and
-requires the isolated application to become healthy again. The candidate has no
-artifact attestation, so the production workflow rejects it. After a successful
-validation, the cleanup step deletes every GHCR version created by this workflow,
-including versions retained after an earlier failed run.
+## Activation status
 
-The workflow uses the `production` GitHub environment because that environment
-holds the Coolify and Tailscale credentials. Its job is still serialized with
-production and requires the same operator approval. The hard UUID inequality and
-the isolated application contract prevent it from targeting the production
-application. After the run, verify on the host that Coolify removed the cancelled
-candidate container before deleting the temporary application.
-
-## Activation sequence
-
-Keep the repository variable `PRODUCTION_DEPLOY_ENABLED` set to `false` while the
-new path is being reviewed. Before changing it:
-
-1. Create and protect the `production` environment.
-2. Move the three deployment secrets into that environment and set its three
-   nonsecret variables.
-3. Confirm the Tailscale ACL and Coolify API allowlist using the workflow identity.
-4. Exercise a successful deployment against the temporary isolated application.
-5. Enable on that application the managed CMD health check recorded in the
-   production contract, redeploy its stable digest, and confirm that Coolify waits
-   for the container to become healthy.
-6. Run `Validate deployment safety` with the isolated application's current
-   digest. Confirm cancellation and restoration in its summary and deployment
-   history, then confirm candidate container cleanup on the host.
-7. Apply the same health-check settings to production and run one manually
-   approved production release. Confirm its effective Docker health check and
-   public revision.
-8. Run the temporary `Validate production rollback` workflow with a new attested
-   digest and the exact current production digest/revision. It first proves the
-   new release with the real public smoke test, then deliberately checks an
-   impossible revision without making the application itself unhealthy. Treat
-   the run as successful only when the previous digest is restored and its
-   revision, health, routes and full smoke test pass. An unrelated endpoint
-   failure makes the workflow fail even if recovery succeeds. As with a normal
-   release, runner or workflow cancellation can interrupt automatic rollback;
-   monitor the approved run until its terminal state.
-9. Enable automatic calls by setting `PRODUCTION_DEPLOY_ENABLED` to `true`.
+The protected production environment, Tailscale path, Coolify contract,
+managed health gate, failed-candidate cancellation, public-smoke rollback,
+release serialization, rolling capacity, and automatic tested-digest promotion
+were accepted in September 2026. `PRODUCTION_DEPLOY_ENABLED` is enabled. The
+isolated canary and its manual validation workflows were temporary acceptance
+infrastructure. Their source harness is retired by this cleanup; remove the
+matching no-domain Coolify resource as the separate final step. Historical run
+evidence remains in GitHub Actions and the private infrastructure record.
 
 The older `deploy.sh` and forced-command launcher remain available only as a
 reviewed emergency fallback during this transition. The current workflow does not
