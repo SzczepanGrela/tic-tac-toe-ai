@@ -13,7 +13,6 @@ import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NoReturn
 
 from web import smokecheck
 
@@ -22,7 +21,6 @@ DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 UUID_PATTERN = re.compile(r"^[a-z0-9]{20,32}$")
 ACTIVE_DEPLOYMENT_STATUSES = {"queued", "in_progress"}
 FAILED_DEPLOYMENT_STATUSES = {"cancelled", "cancelled-by-user", "failed"}
-ROLLBACK_VALIDATION_CONFIRMATION = "restore-after-controlled-public-smoke-failure"
 
 
 class ReleaseError(RuntimeError):
@@ -31,10 +29,6 @@ class ReleaseError(RuntimeError):
 
 class UncertainDeployment(ReleaseError):
     """A deployment request may have reached Coolify, so mutation must stop."""
-
-
-class RollbackValidationTriggered(ReleaseError):
-    """The reviewed public-smoke failure was observed and requires rollback."""
 
 
 def token_from_environment() -> str:
@@ -374,28 +368,6 @@ def check_public_release(base_url: str, revision: str) -> None:
         raise ReleaseError(f"public smoke test failed: {exc}") from exc
 
 
-def trigger_controlled_public_smoke_failure(
-    base_url: str,
-    deployed_revision: str,
-) -> NoReturn:
-    sentinel_revision = "0" * 40 if deployed_revision != "0" * 40 else "f" * 40
-    expected_error = (
-        "public smoke test failed: health revision does not match "
-        "the expected release"
-    )
-    try:
-        check_public_release(base_url, sentinel_revision)
-    except ReleaseError as exc:
-        if str(exc) != expected_error:
-            raise ReleaseError(
-                "rollback validation encountered an unexpected public smoke failure"
-            ) from exc
-        raise RollbackValidationTriggered(
-            "controlled public smoke revision mismatch"
-        ) from exc
-    raise ReleaseError("controlled public smoke revision mismatch was not detected")
-
-
 @dataclass
 class Monitor:
     base_url: str
@@ -621,23 +593,6 @@ def deploy_release(args: argparse.Namespace) -> None:
         previous_revision,
     )
 
-    rollback_validation = (
-        args.rollback_validation_confirmation == ROLLBACK_VALIDATION_CONFIRMATION
-    )
-    if rollback_validation:
-        if previous_digest != args.expected_previous_digest:
-            raise ReleaseError(
-                "rollback validation starting digest does not match production"
-            )
-        if previous_revision != args.expected_previous_revision:
-            raise ReleaseError(
-                "rollback validation starting revision does not match production"
-            )
-        if previous_tag == target_tag:
-            raise ReleaseError(
-                "rollback validation requires a target digest different from production"
-            )
-
     if previous_tag == target_tag:
         if previous_revision != args.expected_revision:
             raise ReleaseError(
@@ -691,11 +646,6 @@ def deploy_release(args: argparse.Namespace) -> None:
             attempts=args.settle_attempts,
         )
         check_public_release(args.public_url, args.expected_revision)
-        if rollback_validation:
-            trigger_controlled_public_smoke_failure(
-                args.public_url,
-                args.expected_revision,
-            )
         soak_release(
             args.public_url,
             args.expected_revision,
@@ -707,7 +657,6 @@ def deploy_release(args: argparse.Namespace) -> None:
     except Exception as deployment_error:
         if not mutation_started:
             raise
-        rollback_started = time.monotonic()
         try:
             rollback_uuid = rollback(
                 client,
@@ -726,23 +675,6 @@ def deploy_release(args: argparse.Namespace) -> None:
                 f"deployment failed ({deployment_error}); "
                 f"rollback also failed ({rollback_error})"
             ) from rollback_error
-        if isinstance(deployment_error, RollbackValidationTriggered):
-            recovery_seconds = time.monotonic() - rollback_started
-            append_summary(
-                [
-                    "### Production rollback validation",
-                    "",
-                    f"- Target deployment: {deployment_uuid}",
-                    f"- Target digest observed: {args.digest}",
-                    f"- Target revision observed: {args.expected_revision}",
-                    "- Controlled public smoke failure: revision mismatch detected",
-                    f"- Rollback deployment: {rollback_uuid}",
-                    f"- Restored revision: {previous_revision}",
-                    f"- Restored digest: {previous_digest}",
-                    f"- Recovery verification: {recovery_seconds:.1f} seconds",
-                ]
-            )
-            return
         raise ReleaseError(
             f"deployment failed and rollback {rollback_uuid} restored "
             f"{previous_revision}: {deployment_error}"
@@ -770,9 +702,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--public-url", required=True)
     parser.add_argument("--digest", required=True)
     parser.add_argument("--expected-revision", required=True)
-    parser.add_argument("--rollback-validation-confirmation")
-    parser.add_argument("--expected-previous-digest")
-    parser.add_argument("--expected-previous-revision")
     parser.add_argument(
         "--contract",
         type=Path,
@@ -790,22 +719,6 @@ def parse_args() -> argparse.Namespace:
         parser.error("expected revision must be a full lowercase commit SHA")
     if urllib.parse.urlsplit(args.public_url).scheme != "https":
         parser.error("public URL must use HTTPS")
-    validation_values = (
-        args.rollback_validation_confirmation,
-        args.expected_previous_digest,
-        args.expected_previous_revision,
-    )
-    if any(value is not None for value in validation_values):
-        if args.rollback_validation_confirmation != ROLLBACK_VALIDATION_CONFIRMATION:
-            parser.error("rollback validation confirmation is invalid")
-        if not args.expected_previous_digest or not DIGEST_PATTERN.fullmatch(
-            args.expected_previous_digest
-        ):
-            parser.error("expected previous digest is invalid")
-        if not args.expected_previous_revision or not smokecheck.REVISION_PATTERN.fullmatch(
-            args.expected_previous_revision
-        ):
-            parser.error("expected previous revision must be a full lowercase commit SHA")
     for field in (
         "deployment_timeout",
         "poll_interval",
