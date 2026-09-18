@@ -6,15 +6,17 @@ import os
 import random
 import secrets
 import time
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import TypeVar
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt, model_validator
 
 from ai.registry import AgentId, AgentRegistry
-from game.state import GameState
+from game.state import GameRules, GameState
 
 STATIC_DIR = Path(__file__).parent / "static"
 STATIC_ASSETS = {
@@ -27,14 +29,39 @@ LOCALE_ASSETS = {
     for language in ("en", "pl")
 }
 INDEX_HTML = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
-AI_SEMAPHORE = asyncio.Semaphore(2)
 RELEASE_REVISION = os.getenv("RELEASE_REVISION", "development")
+AI_ACTIVE_LIMIT = 2
+AI_WAITING_LIMIT = 8
+AI_MOVE_TIMEOUT_SECONDS = 5.0
+AI_MATCH_TIMEOUT_SECONDS = 30.0
+T = TypeVar("T")
 
 
-class MoveRequest(BaseModel):
-    board: list[list[int]]
+class RulesRequest(BaseModel):
+    board_size: StrictInt | None = None
+    win_length: StrictInt | None = None
+
+    @model_validator(mode="after")
+    def require_complete_rules(self) -> "RulesRequest":
+        if (self.board_size is None) != (self.win_length is None):
+            raise ValueError("board_size and win_length must be provided together")
+        if self.board_size is not None:
+            try:
+                GameRules(self.board_size, self.win_length)
+            except ValueError as exc:
+                raise ValueError(str(exc)) from exc
+        return self
+
+    def game_rules(self) -> GameRules:
+        if self.board_size is None:
+            return GameRules()
+        return GameRules(self.board_size, self.win_length)
+
+
+class MoveRequest(RulesRequest):
+    board: list[list[StrictInt]]
     algorithm: AgentId
-    seed: int | None = None
+    seed: StrictInt | None = None
 
 
 class Move(BaseModel):
@@ -46,19 +73,23 @@ class Move(BaseModel):
 class MoveResponse(BaseModel):
     move: Move
     seed: int
+    board_size: int
+    win_length: int
 
 
-class MatchRequest(BaseModel):
+class MatchRequest(RulesRequest):
     x_algorithm: AgentId
     o_algorithm: AgentId
-    games: int = Field(default=1, ge=1, le=10)
-    seed: int | None = None
+    games: StrictInt = Field(default=1, ge=1, le=10)
+    seed: StrictInt | None = None
 
 
 class GameTrace(BaseModel):
     game: int
     winner: int
     moves: list[Move]
+    board_size: int
+    win_length: int
 
 
 class MatchSummary(BaseModel):
@@ -71,6 +102,8 @@ class MatchResponse(BaseModel):
     seed: int
     x_algorithm: AgentId
     o_algorithm: AgentId
+    board_size: int
+    win_length: int
     games: list[GameTrace]
     summary: MatchSummary
 
@@ -117,6 +150,79 @@ class TokenBucket:
             return max(1, math.ceil((cost - tokens) / self.refill_per_second))
 
 
+class WorkQueueFull(Exception):
+    pass
+
+
+class WorkTimedOut(Exception):
+    pass
+
+
+class WorkGate:
+    def __init__(self, active_limit: int, waiting_limit: int) -> None:
+        self._semaphore = asyncio.Semaphore(active_limit)
+        self._waiting_limit = waiting_limit
+        self._waiting = 0
+        self._waiting_lock = asyncio.Lock()
+
+    async def _acquire(self) -> None:
+        queued = self._semaphore.locked()
+        if queued:
+            async with self._waiting_lock:
+                if self._waiting >= self._waiting_limit:
+                    raise WorkQueueFull
+                self._waiting += 1
+        try:
+            await self._semaphore.acquire()
+        finally:
+            if queued:
+                async with self._waiting_lock:
+                    self._waiting -= 1
+
+    @asynccontextmanager
+    async def slot(self) -> AsyncIterator[None]:
+        await self._acquire()
+        try:
+            yield
+        finally:
+            self._semaphore.release()
+
+    async def run(
+        self,
+        function: Callable[..., T],
+        *args: object,
+        timeout_seconds: float,
+    ) -> T:
+        await self._acquire()
+        release_on_exit = True
+        worker = asyncio.create_task(asyncio.to_thread(function, *args))
+        try:
+            return await asyncio.wait_for(
+                asyncio.shield(worker),
+                timeout=timeout_seconds,
+            )
+        except TimeoutError as exc:
+            release_on_exit = False
+            worker.add_done_callback(self._release_after_worker)
+            raise WorkTimedOut from exc
+        except asyncio.CancelledError:
+            # asyncio cannot stop a thread that has already started. Keep the
+            # work slot occupied until it really exits, then propagate the
+            # cancelled request.
+            await worker
+            raise
+        finally:
+            if release_on_exit:
+                self._semaphore.release()
+
+    def _release_after_worker(self, worker: asyncio.Task[T]) -> None:
+        try:
+            worker.exception()
+        except asyncio.CancelledError:
+            pass
+        self._semaphore.release()
+
+
 move_limiter = TokenBucket(capacity=10, refill_per_second=0.5)
 match_limiter = TokenBucket(capacity=30, refill_per_second=0.5)
 
@@ -124,10 +230,11 @@ match_limiter = TokenBucket(capacity=30, refill_per_second=0.5)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.registry = AgentRegistry(require_models=True)
+    app.state.work_gate = WorkGate(AI_ACTIVE_LIMIT, AI_WAITING_LIMIT)
     yield
 
 
-app = FastAPI(title="Tic-Tac-Toe AI Lab", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="Tic-Tac-Toe AI Lab", version="2.1.0", lifespan=lifespan)
 
 
 def _client_ip(request: Request) -> str:
@@ -163,7 +270,30 @@ async def health(request: Request) -> dict[str, object]:
     }
 
 
+@app.get("/api/agents")
+async def agent_capabilities(
+    request: Request,
+    board_size: int = Query(default=3),
+    win_length: int = Query(default=3),
+) -> dict[str, object]:
+    try:
+        rules = GameRules(board_size, win_length)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "board_size": rules.board_size,
+        "win_length": rules.win_length,
+        "revision": RELEASE_REVISION,
+        "agents": request.app.state.registry.capabilities(rules),
+    }
+
+
 def _select_move(registry: AgentRegistry, agent_id: AgentId, state: GameState, rng: random.Random) -> tuple[int, int]:
+    if not registry.supports_rules(agent_id, state.rules):
+        raise HTTPException(
+            status_code=422,
+            detail=f"{agent_id.value} does not support {state.board_size}x{state.board_size} with {state.win_length} in a row",
+        )
     try:
         move = registry.get(agent_id).select_move(state.clone(), rng)
     except KeyError as exc:
@@ -171,6 +301,28 @@ def _select_move(registry: AgentRegistry, agent_id: AgentId, state: GameState, r
     if move not in state.get_available_moves():
         raise HTTPException(status_code=500, detail=f"{agent_id.value} returned an illegal move")
     return move
+
+
+async def _run_ai_work(
+    request: Request,
+    function: Callable[..., T],
+    *args: object,
+    timeout_seconds: float = AI_MOVE_TIMEOUT_SECONDS,
+) -> T:
+    try:
+        return await request.app.state.work_gate.run(
+            function,
+            *args,
+            timeout_seconds=timeout_seconds,
+        )
+    except WorkQueueFull as exc:
+        raise HTTPException(
+            status_code=429,
+            detail="AI work queue is full",
+            headers={"Retry-After": "1"},
+        ) from exc
+    except WorkTimedOut as exc:
+        raise HTTPException(status_code=504, detail="AI computation timed out") from exc
 
 
 @app.post("/api/move", response_model=MoveResponse)
@@ -183,45 +335,59 @@ async def calculate_move(payload: MoveRequest, request: Request) -> MoveResponse
             headers={"Retry-After": str(retry_after)},
         )
     try:
-        state = GameState.from_board(payload.board)
+        state = GameState.from_board(payload.board, payload.game_rules())
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if state.is_game_over():
         raise HTTPException(status_code=409, detail="The game is already over")
     seed = payload.seed if payload.seed is not None else secrets.randbits(32)
-    async with AI_SEMAPHORE:
-        move = await asyncio.to_thread(
-            _select_move,
-            request.app.state.registry,
-            payload.algorithm,
-            state,
-            random.Random(seed),
-        )
-    return MoveResponse(move=Move(row=move[0], column=move[1], player=state.current_player), seed=seed)
+    move = await _run_ai_work(
+        request,
+        _select_move,
+        request.app.state.registry,
+        payload.algorithm,
+        state,
+        random.Random(seed),
+    )
+    return MoveResponse(
+        move=Move(row=move[0], column=move[1], player=state.current_player),
+        seed=seed,
+        board_size=state.board_size,
+        win_length=state.win_length,
+    )
 
 
 def _simulate_matches(payload: MatchRequest, registry: AgentRegistry, seed: int) -> MatchResponse:
+    rules = payload.game_rules()
     rng = random.Random(seed)
     traces = []
     x_wins = o_wins = draws = 0
     for game_number in range(1, payload.games + 1):
-        state = GameState()
+        state = GameState(rules=rules)
         moves = []
         while not state.is_game_over():
             agent_id = payload.x_algorithm if state.current_player == 1 else payload.o_algorithm
             player = state.current_player
             move = _select_move(registry, agent_id, state, rng)
-            state.make_move(*move)
+            state.make_move_assuming_active(*move)
             moves.append(Move(row=move[0], column=move[1], player=player))
         winner = int(state.get_winner())
         x_wins += winner == 1
         o_wins += winner == -1
         draws += winner == 0
-        traces.append(GameTrace(game=game_number, winner=winner, moves=moves))
+        traces.append(GameTrace(
+            game=game_number,
+            winner=winner,
+            moves=moves,
+            board_size=rules.board_size,
+            win_length=rules.win_length,
+        ))
     return MatchResponse(
         seed=seed,
         x_algorithm=payload.x_algorithm,
         o_algorithm=payload.o_algorithm,
+        board_size=rules.board_size,
+        win_length=rules.win_length,
         games=traces,
         summary=MatchSummary(x_wins=x_wins, o_wins=o_wins, draws=draws),
     )
@@ -229,6 +395,15 @@ def _simulate_matches(payload: MatchRequest, registry: AgentRegistry, seed: int)
 
 @app.post("/api/matches", response_model=MatchResponse)
 async def calculate_matches(payload: MatchRequest, request: Request) -> MatchResponse:
+    rules = payload.game_rules()
+    if rules != GameRules():
+        raise HTTPException(
+            status_code=422,
+            detail="Larger-board series must use the incremental move endpoint",
+        )
+    for agent_id in (payload.x_algorithm, payload.o_algorithm):
+        if not request.app.state.registry.supports_rules(agent_id, rules):
+            raise HTTPException(status_code=422, detail=f"{agent_id.value} does not support these rules")
     retry_after = await match_limiter.consume(_client_ip(request), cost=payload.games)
     if retry_after is not None:
         raise HTTPException(
@@ -237,10 +412,11 @@ async def calculate_matches(payload: MatchRequest, request: Request) -> MatchRes
             headers={"Retry-After": str(retry_after)},
         )
     seed = payload.seed if payload.seed is not None else secrets.randbits(32)
-    async with AI_SEMAPHORE:
-        return await asyncio.to_thread(
-            _simulate_matches,
-            payload,
-            request.app.state.registry,
-            seed,
-        )
+    return await _run_ai_work(
+        request,
+        _simulate_matches,
+        payload,
+        request.app.state.registry,
+        seed,
+        timeout_seconds=AI_MATCH_TIMEOUT_SECONDS,
+    )

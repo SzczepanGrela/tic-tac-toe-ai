@@ -20,7 +20,7 @@ def reachable_states() -> list[GameState]:
         states[key] = state.clone()
         for move in state.get_available_moves():
             child = state.clone()
-            child.make_move(*move)
+            child.make_move_assuming_active(*move)
             visit(child)
 
     visit(GameState())
@@ -34,7 +34,7 @@ def optimal_moves(state: GameState) -> list[tuple[int, int]]:
     moves = state.get_available_moves()
     for move in moves:
         child = state.clone()
-        child.make_move(*move)
+        child.make_move_assuming_active(*move)
         score = minimax(child, len(moves) - 1, float("-inf"), float("inf"), False, player, cache)
         scored.append((move, score))
     best = max(score for _, score in scored)

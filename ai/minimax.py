@@ -50,7 +50,7 @@ def minimax(
         completed = True
         for move in game_state.get_available_moves():
             child = game_state.clone()
-            child.make_move(*move)
+            child.make_move_assuming_active(*move)
             score = max(score, minimax(child, depth - 1, alpha, beta, False, ai_player, cache))
             alpha = max(alpha, score)
             if beta <= alpha:
@@ -63,7 +63,7 @@ def minimax(
     completed = True
     for move in game_state.get_available_moves():
         child = game_state.clone()
-        child.make_move(*move)
+        child.make_move_assuming_active(*move)
         score = min(score, minimax(child, depth - 1, alpha, beta, True, ai_player, cache))
         beta = min(beta, score)
         if beta <= alpha:
@@ -90,7 +90,7 @@ def find_best_move(game_state: GameState, depth: Optional[int] = None, rng: rand
     cache: dict[tuple, int] = {}
     for move in moves:
         child = game_state.clone()
-        child.make_move(*move)
+        child.make_move_assuming_active(*move)
         score = minimax(child, depth - 1, float("-inf"), float("inf"), False, ai_player, cache)
         scored_moves.append((move, score))
     best_score = max(score for _, score in scored_moves)
@@ -105,7 +105,7 @@ def _minimax_with_tree(game_state: GameState, depth: int, alpha: float, beta: fl
     best = float("-inf") if is_max_turn else float("inf")
     for move in game_state.get_available_moves():
         child_state = game_state.clone()
-        child_state.make_move(*move)
+        child_state.make_move_assuming_active(*move)
         score, child_node = _minimax_with_tree(child_state, depth - 1, alpha, beta, not is_max_turn, max_depth, ai_player)
         child_node.move = move
         node.children.append(child_node)
@@ -131,7 +131,7 @@ def find_best_move_with_tree(game_state: GameState, ai_player: int, depth: Optio
     best_moves = []
     for move in moves:
         child_state = game_state.clone()
-        child_state.make_move(*move)
+        child_state.make_move_assuming_active(*move)
         score, child_node = _minimax_with_tree(child_state, depth - 1, float("-inf"), float("inf"), False, depth, ai_player)
         child_node.move = move
         root.children.append(child_node)

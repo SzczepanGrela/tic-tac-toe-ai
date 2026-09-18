@@ -22,7 +22,7 @@ def play_game(x_agent: Agent, o_agent: Agent, rng: random.Random) -> int:
         move = agent.select_move(state.clone(), rng)
         if move not in state.get_available_moves():
             raise ValueError(f"agent returned illegal move: {move}")
-        state.make_move(*move)
+        state.make_move_assuming_active(*move)
     return int(state.get_winner())
 
 

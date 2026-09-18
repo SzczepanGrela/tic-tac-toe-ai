@@ -52,7 +52,7 @@ class MCTSAgent:
                 move = self.rng.choice(node.untried_moves)
                 node.untried_moves.remove(move)
                 child_state = node.game_state.clone()
-                child_state.make_move(*move)
+                child_state.make_move_assuming_active(*move)
                 child = MCTSNode(child_state, node, move)
                 node.children.append(child)
                 return child
@@ -65,7 +65,7 @@ class MCTSAgent:
             for move in moves:
                 candidate = state.clone()
                 candidate.current_player = player
-                candidate.make_move(*move)
+                candidate.make_move_assuming_active(*move)
                 if candidate.get_winner() == player:
                     return move
         weighted = []
@@ -76,7 +76,7 @@ class MCTSAgent:
     def _simulate(self, game_state: GameState, root_player: int) -> float:
         state = game_state.clone()
         while not state.is_game_over():
-            state.make_move(*self._simulation_move(state))
+            state.make_move_assuming_active(*self._simulation_move(state))
         winner = state.get_winner()
         return 1.0 if winner == root_player else 0.0 if winner == -root_player else 0.5
 

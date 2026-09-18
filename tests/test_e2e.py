@@ -1,3 +1,4 @@
+import json
 import os
 
 import pytest
@@ -22,6 +23,35 @@ def test_winning_line_appears_for_completed_game(page, live_server_url):
     for index in (0, 3, 1, 4, 2):
         page.locator(".cell").nth(index).click()
     expect(page.locator(".winning-line.row-0")).to_be_visible()
+
+
+def test_ten_by_ten_local_game_detects_an_off_center_win(page, live_server_url):
+    page.goto(live_server_url)
+    page.get_by_role("button", name="Local players").click()
+    page.locator("#board-size").select_option("10")
+
+    expect(page.locator("#win-length")).to_have_value("5")
+    expect(page.locator(".cell")).to_have_count(100)
+    page.locator(".cell").first.focus()
+    page.keyboard.press("ArrowRight")
+    page.keyboard.press("ArrowDown")
+    expect(page.locator(".cell").nth(11)).to_be_focused()
+    for index in (12, 0, 13, 1, 14, 3, 15, 4, 16):
+        page.locator(".cell").nth(index).click()
+
+    expect(page.get_by_role("status")).to_have_text("Player X wins!")
+    expect(page.locator(".winning-line.row-1")).to_be_visible()
+
+
+def test_larger_board_disables_classic_only_agents(page, live_server_url):
+    page.goto(live_server_url)
+    page.locator("#board-size").select_option("4")
+
+    expect(page.locator("#human-agent option[value=dqn]")).to_have_attribute("disabled", "")
+    expect(page.locator("#human-agent option[value=random]")).not_to_have_attribute("disabled", "")
+    expect(page.locator("#human-agent option[value=rules]")).not_to_have_attribute("disabled", "")
+    expect(page.locator("#human-agent")).to_have_value("random")
+    expect(page.locator("#algorithm-note")).to_contain_text("Available for these rules: Random, Rules.")
 
 
 def test_previous_ai_response_cannot_change_a_reset_board(page, live_server_url):
@@ -59,6 +89,92 @@ def test_ai_vs_ai_replay_controls(page, live_server_url):
     expect(page.locator("#series-meta")).to_contain_text("Seed 42")
     page.get_by_role("button", name="Pause").click()
     page.get_by_role("button", name="Step").click()
+
+
+def test_larger_ai_series_uses_incremental_moves_and_replays(page, live_server_url):
+    requests = []
+
+    def choose_first_legal(route):
+        payload = json.loads(route.request.post_data)
+        requests.append(payload)
+        board = payload["board"]
+        player = 1 if sum(value != 0 for row in board for value in row) % 2 == 0 else -1
+        row, column = next(
+            (row_index, column_index)
+            for row_index, row_values in enumerate(board)
+            for column_index, value in enumerate(row_values)
+            if value == 0
+        )
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"move": {"row": row, "column": column, "player": player}}),
+        )
+
+    page.add_init_script("Math.random = () => 0")
+    page.route("**/api/move", choose_first_legal)
+    page.goto(live_server_url)
+    page.get_by_role("button", name="AI vs AI").click()
+    page.locator("#board-size").select_option("4")
+    page.locator("#x-agent").select_option("random")
+    page.locator("#o-agent").select_option("rules")
+    page.locator("#series-count").select_option("1")
+    page.locator("#seed").fill("123")
+    page.get_by_role("button", name="Run series").click()
+
+    page.locator("#scoreboard:not(.hidden)").wait_for()
+    expect(page.locator("#series-meta")).to_contain_text("4×4, 4 in a row")
+    expect(page.locator(".cell")).to_have_count(16)
+    assert requests
+    assert all(request["board_size"] == 4 for request in requests)
+    assert all(request["win_length"] == 4 for request in requests)
+
+
+def test_larger_series_pause_and_step_control_move_requests(page, live_server_url):
+    page.add_init_script("""
+        Math.random = () => 0;
+        window.moveRequests = 0;
+        const nativeFetch = window.fetch.bind(window);
+        window.fetch = (url, options) => {
+            if (url !== '/api/move') return nativeFetch(url, options);
+            const payload = JSON.parse(options.body);
+            const board = payload.board;
+            const marks = board.flat().filter(Boolean).length;
+            const index = board.flat().findIndex(value => value === 0);
+            const size = payload.board_size;
+            window.moveRequests++;
+            return new Promise(resolve => setTimeout(() => resolve(new Response(
+                JSON.stringify({move: {
+                    row: Math.floor(index / size),
+                    column: index % size,
+                    player: marks % 2 === 0 ? 1 : -1,
+                }}),
+                {status: 200, headers: {'Content-Type': 'application/json'}},
+            )), 60));
+        };
+    """)
+    page.goto(live_server_url)
+    page.get_by_role("button", name="AI vs AI").click()
+    page.locator("#board-size").select_option("4")
+    page.locator("#x-agent").select_option("random")
+    page.locator("#o-agent").select_option("rules")
+    page.locator("#series-count").select_option("1")
+    page.get_by_role("button", name="Run series").click()
+
+    page.wait_for_function("window.moveRequests >= 1")
+    page.get_by_role("button", name="Pause").click()
+    requests_at_pause = page.evaluate("window.moveRequests")
+    page.wait_for_timeout(180)
+    assert page.evaluate("window.moveRequests") == requests_at_pause
+    expect(page.get_by_role("status")).to_have_text("Series paused")
+
+    page.get_by_role("button", name="Step").click()
+    page.wait_for_function(f"window.moveRequests === {requests_at_pause + 1}")
+    page.wait_for_timeout(100)
+    assert page.evaluate("window.moveRequests") == requests_at_pause + 1
+
+    page.get_by_role("button", name="Resume").click()
+    page.locator("#scoreboard:not(.hidden)").wait_for()
 
 
 def test_ai_vs_ai_displays_non_draw_score(page, live_server_url):
