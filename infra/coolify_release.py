@@ -368,6 +368,13 @@ def check_public_release(base_url: str, revision: str) -> None:
         raise ReleaseError(f"public smoke test failed: {exc}") from exc
 
 
+def check_public_baseline(base_url: str, revision: str) -> None:
+    try:
+        smokecheck.check_baseline_release(base_url, revision)
+    except (OSError, ValueError) as exc:
+        raise ReleaseError(f"public baseline smoke test failed: {exc}") from exc
+
+
 @dataclass
 class Monitor:
     base_url: str
@@ -567,7 +574,7 @@ def rollback(
         attempts=health_attempts,
         interval=interval,
     )
-    check_public_release(public_url, previous_revision)
+    check_public_baseline(public_url, previous_revision)
     return rollback_uuid
 
 
@@ -587,7 +594,7 @@ def deploy_release(args: argparse.Namespace) -> None:
     assert isinstance(previous_tag_value, str)
     previous_tag = previous_tag_value
     previous_revision = read_public_revision(args.public_url)
-    check_public_release(args.public_url, previous_revision)
+    check_public_baseline(args.public_url, previous_revision)
     verify_image_revision(
         f"{image_repository}@{previous_digest}",
         previous_revision,

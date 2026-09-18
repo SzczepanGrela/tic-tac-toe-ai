@@ -94,6 +94,50 @@ def test_smokecheck_validates_health_assets_and_real_move(monkeypatch) -> None:
     ]
 
 
+def test_baseline_smokecheck_does_not_require_new_release_endpoints(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requested: list[tuple[str, str]] = []
+
+    def fake_open(request: urllib.request.Request | str, timeout: int) -> Response:
+        url = (
+            request.full_url
+            if isinstance(request, urllib.request.Request)
+            else request
+        )
+        method = (
+            request.get_method()
+            if isinstance(request, urllib.request.Request)
+            else "GET"
+        )
+        requested.append((method, url))
+        if url.endswith("/api/health"):
+            return response(
+                {
+                    "status": "ok",
+                    "revision": REVISION,
+                    "agents": {"rules": "ready"},
+                }
+            )
+        if "/api/agents" in url:
+            raise AssertionError("baseline requested a version-specific endpoint")
+        return response(b"x")
+
+    monkeypatch.setattr(smokecheck, "_open", fake_open)
+
+    smokecheck.check_baseline_release(
+        "https://tictactoe.example/",
+        REVISION,
+        timeout=4,
+    )
+
+    assert requested == [
+        ("GET", "https://tictactoe.example/api/health"),
+        ("GET", "https://tictactoe.example/"),
+        ("GET", "https://tictactoe.example/static/favicon.svg"),
+    ]
+
+
 def test_smokecheck_rejects_a_different_revision(monkeypatch) -> None:
     monkeypatch.setattr(
         smokecheck,

@@ -92,8 +92,10 @@ The release proceeds as follows:
 2. Connect to the private Coolify API using the short-lived Tailscale identity.
 3. Require an exact match with the checked-in Coolify contract and a healthy
    production application, with no deployment already running for it.
-4. Record the current digest and public revision, smoke-test the current release,
-   and verify that the saved digest contains that revision label.
+4. Record the current digest and public revision, check the stable health and
+   asset contract shared with earlier releases, and verify that the saved digest
+   contains that revision label. Version-specific checks must not block an
+   upgrade from a release that predates a newly added endpoint.
 5. Change only the image digest, read it back, submit one deployment request, and
    track the exact deployment UUID returned by Coolify.
 6. During the rolling update, accept the previous or target revision from the
@@ -102,7 +104,8 @@ The release proceeds as follows:
 7. After Coolify reports completion, require the target revision repeatedly,
    rerun the complete public smoke test, and observe it for an additional window.
 8. On a failure with a known deployment state, restore the saved digest through
-   Coolify, deploy it, and verify the previous public revision and full smoke test.
+   Coolify, deploy it, and verify the previous public revision and stable
+   cross-version smoke test.
 
 Read requests can be retried. Mutation requests are never blindly retried. If a
 deployment or cancellation response is uncertain, the workflow stops for manual
