@@ -1,8 +1,8 @@
 # Variable-board implementation plan
 
-Status: implemented and validated locally on 2026-09-18; container/CI acceptance,
-review, merge and production release remain open. The measurements in this file
-are development-machine observations unless explicitly described as targets.
+Status: implemented and validated locally and in CI on 2026-09-18; review,
+merge and production release remain open. The measurements in this file are
+development-machine observations unless explicitly described as targets.
 
 ## Scope and proposed rules
 
@@ -77,7 +77,7 @@ G05, J01 and T01 do not block the first release.
 | G04 | local-complete (2026-09-18) | General Rules agent | G01, G02 | All variants enabled; wins, blocks, centre selection and legal moves tested; 2,160-sample development benchmark passed. |
 | G05 | deferred | Larger-board MCTS | G01, G02, G04 | Optional; current MCTS remains 3×3-only. |
 | G06 | local-complete (2026-09-18) | Resource limits and release validation | G03, G04; G05 if included | Queue, cancellation ownership, deadlines, larger smoke, Python 3.12 API suite and production-sized local container passed. CI remains part of G07. |
-| G07 | in-progress | Documentation and controlled release | G06 | Repository support documentation updated. Review, approved digest deployment, public smoke and rollback check remain. |
+| G07 | in-progress | Documentation and controlled release | G06 | Documentation and PR CI complete. Review, merge, approved digest deployment, public smoke and rollback check remain. |
 | J01 | deferred | Optional Jev integration | G02, G03, G06 | Provider adapter, service isolation, cost limits and per-variant evaluation require separate acceptance. |
 | T01 | deferred | Optional learned policies for larger boards | G01, G04, G06 | Architecture, training budget, teacher/rewards and promotion criteria require a separate project. |
 
@@ -239,6 +239,10 @@ runtime hangs while closing an executor after ONNX-backed API tests, so the
 complete API suite was deliberately repeated in the Python 3.12 image used by
 CI and production.
 
+GitHub Actions run `35363309532` passed Browser, Python 3.12, Python 3.13,
+Training smoke, Container and Quality gate for PR #21. The deployment job was
+correctly skipped for the pull-request event.
+
 ### G07 — Delivery and documentation
 
 - Suggested review units: engine/capabilities (G01/G02), Random/UI/bounded
@@ -290,5 +294,5 @@ does not compromise application readiness. Larger-board MCTS, Jev and new
 training are independently tracked follow-ups.
 
 As of 2026-09-18 this definition is not yet satisfied: G01-G04 and G06 are
-locally complete, while G07 still needs CI, review and the controlled production
-release.
+complete through CI, while G07 still needs review, merge and the controlled
+production release.
