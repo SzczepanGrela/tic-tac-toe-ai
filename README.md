@@ -19,7 +19,13 @@ The trained agents are pure policies: no hidden win/block heuristic is applied d
 
 ## Web application
 
-The interface supports Human vs AI, local Player vs Player, and AI vs AI series. AI matches include deterministic seeds, complete move replays, pause/resume, single-step playback, five speeds, and aggregate results. English/Polish language and light/dark theme preferences are stored in first-party cookies.
+The interface supports Human vs AI, local Player vs Player, and AI vs AI series. Boards range from 3×3 through 10×10, with a configurable winning line from 3 marks through the board size. A newly selected size defaults to `min(size, 5)` marks in a row. AI matches include deterministic seeds, complete move replays, pause/resume, single-step playback, five speeds, and aggregate results. English/Polish language and light/dark theme preferences are stored in first-party cookies.
+
+Random and Rules support every board variant. Minimax, MCTS, Q-learning, DQN,
+Imitation, and REINFORCE remain available for classic 3×3 only. The interface
+gets this compatibility matrix from `/api/agents` and disables unsupported
+choices; the API also rejects an incompatible pair before inference. Existing
+learned artifacts are unchanged and were not retrained for this feature.
 
 ```bash
 git clone https://github.com/SzczepanGrela/tic-tac-toe-ai.git
@@ -61,6 +67,10 @@ python -m training promote --agent dqn --run training/runs/<run>
 ```
 
 See [benchmark results](docs/benchmark.md) for the promoted models.
+
+The [variable-board implementation record](docs/variable-board-plan.md) covers
+the rules, compatibility contract, safety limits, measurements, validation and
+deferred MCTS/model/provider work.
 
 ## Tests
 

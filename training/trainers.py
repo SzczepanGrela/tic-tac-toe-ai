@@ -38,7 +38,7 @@ def train_q_learning(preset: str, seed: int) -> TrainingResult:
             board = state.board.copy()
             player = state.current_player
             move = agent.select_move(state, rng, epsilon)
-            state.make_move(*move)
+            state.make_move_assuming_active(*move)
             winner = state.get_winner()
             reward = 1.0 if winner == player else 0.0
             agent.update_transition(board, player, move, reward, state, winner is not None)
@@ -79,7 +79,7 @@ def train_dqn(preset: str, seed: int) -> TrainingResult:
                     scores = network(torch.from_numpy(features).unsqueeze(0))[0]
                 move = max(moves, key=lambda item: float(scores[item[0] * 3 + item[1]]))
             player = state.current_player
-            state.make_move(*move)
+            state.make_move_assuming_active(*move)
             winner = state.get_winner()
             next_features = encode_board(state.board, state.current_player)
             legal = np.zeros(9, dtype=bool)
@@ -250,7 +250,7 @@ def _quick_policy_score(network: PolicyNetwork, seed: int) -> float:
                     move = max(moves, key=lambda item: float(scores[item[0] * 3 + item[1]]))
                 else:
                     move = opponent_move(state, rng)
-                state.make_move(*move)
+                state.make_move_assuming_active(*move)
             winner = state.get_winner()
             outcome = 0 if winner is None else 1 if winner == policy_player else -1
             results[opponent_name][outcome + 1] += 1

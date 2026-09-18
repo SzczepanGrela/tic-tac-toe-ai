@@ -42,7 +42,7 @@ def evaluate_candidate(candidate: Agent, opponent: Agent, opponent_name: str, ga
                     result.wins += 1
                 invalid = True
                 break
-            state.make_move(*move)
+            state.make_move_assuming_active(*move)
         if invalid:
             continue
         winner = state.get_winner()

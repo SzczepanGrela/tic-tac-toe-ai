@@ -1,10 +1,12 @@
 import asyncio
 import time
+from types import SimpleNamespace
 
+import pytest
 from httpx import ASGITransport, AsyncClient
 
 import web.app as web_app
-from web.app import TokenBucket, app, lifespan
+from web.app import TokenBucket, WorkGate, WorkQueueFull, _run_ai_work, app, lifespan
 
 
 def request(method: str, path: str, **kwargs):
@@ -19,8 +21,22 @@ def test_health_and_frontend():
     assert request("GET", "/").status_code == 200
     payload = request("GET", "/api/health").json()
     assert payload["status"] == "ok"
-    assert payload["revision"] == "development"
+    assert payload["revision"] == web_app.RELEASE_REVISION
     assert set(payload["agents"].values()) == {"ready"}
+
+
+def test_agent_capabilities_are_scoped_to_rules():
+    classic = request("GET", "/api/agents").json()
+    assert classic["board_size"] == classic["win_length"] == 3
+    assert classic["revision"] == web_app.RELEASE_REVISION
+    assert all(agent["available"] for agent in classic["agents"])
+    assert all(agent["policy_version"] for agent in classic["agents"])
+    assert all(agent["work_profile"] for agent in classic["agents"])
+
+    larger = request("GET", "/api/agents?board_size=10&win_length=5").json()
+    available = {agent["id"] for agent in larger["agents"] if agent["available"]}
+    assert available == {"random", "rules"}
+    assert request("GET", "/api/agents?board_size=11&win_length=5").status_code == 422
 
 
 def test_favicon_is_served():
@@ -43,6 +59,76 @@ def test_move_supports_every_agent():
         response = request("POST", "/api/move", json={"board": board, "algorithm": algorithm, "seed": 7})
         assert response.status_code == 200
         assert response.json()["move"]["player"] == 1
+        assert response.json()["board_size"] == response.json()["win_length"] == 3
+
+
+def test_larger_move_requires_complete_rules_and_supported_agent(monkeypatch):
+    monkeypatch.setattr(web_app, "move_limiter", TokenBucket(100, 100))
+    board = [[0] * 10 for _ in range(10)]
+
+    incomplete = request(
+        "POST",
+        "/api/move",
+        json={"board": board, "algorithm": "random", "board_size": 10},
+    )
+    assert incomplete.status_code == 422
+
+    unsupported = request(
+        "POST",
+        "/api/move",
+        json={
+            "board": board,
+            "algorithm": "dqn",
+            "board_size": 10,
+            "win_length": 5,
+        },
+    )
+    assert unsupported.status_code == 422
+
+    supported = request(
+        "POST",
+        "/api/move",
+        json={
+            "board": board,
+            "algorithm": "random",
+            "board_size": 10,
+            "win_length": 5,
+            "seed": 7,
+        },
+    )
+    assert supported.status_code == 200
+    assert supported.json()["board_size"] == 10
+    assert supported.json()["win_length"] == 5
+    assert 0 <= supported.json()["move"]["row"] < 10
+    assert 0 <= supported.json()["move"]["column"] < 10
+
+
+def test_move_rejects_coerced_board_values():
+    payload = {"board": [[0] * 3 for _ in range(3)], "algorithm": "random"}
+    payload["board"][0][0] = "1"
+
+    assert request("POST", "/api/move", json=payload).status_code == 422
+
+
+def test_move_rejects_unknown_agent_and_terminal_board(monkeypatch):
+    monkeypatch.setattr(web_app, "move_limiter", TokenBucket(100, 100))
+    empty = [[0] * 3 for _ in range(3)]
+    unknown = request(
+        "POST",
+        "/api/move",
+        json={"board": empty, "algorithm": "unknown"},
+    )
+    terminal = request(
+        "POST",
+        "/api/move",
+        json={
+            "board": [[1, 1, 1], [-1, -1, 0], [0, 0, 0]],
+            "algorithm": "rules",
+        },
+    )
+
+    assert unknown.status_code == 422
+    assert terminal.status_code == 409
 
 
 def test_match_series_is_reproducible_and_complete():
@@ -70,6 +156,21 @@ def test_match_rejects_invalid_game_count():
     assert response.status_code == 422
 
 
+def test_match_rejects_larger_synchronous_series():
+    response = request(
+        "POST",
+        "/api/matches",
+        json={
+            "x_algorithm": "random",
+            "o_algorithm": "random",
+            "games": 1,
+            "board_size": 4,
+            "win_length": 3,
+        },
+    )
+    assert response.status_code == 422
+
+
 def test_token_bucket_supports_bursts_and_weighted_costs():
     async def exercise():
         limiter = TokenBucket(capacity=3, refill_per_second=1)
@@ -91,6 +192,107 @@ def test_token_bucket_removes_idle_refilled_clients():
         assert await limiter.consume("new") is None
         assert "idle" not in limiter.buckets
         assert "active" in limiter.buckets
+
+    asyncio.run(exercise())
+
+
+def test_work_gate_bounds_active_and_waiting_work():
+    async def exercise():
+        gate = WorkGate(active_limit=1, waiting_limit=1)
+        active = asyncio.Event()
+        release = asyncio.Event()
+
+        async def occupy():
+            async with gate.slot():
+                active.set()
+                await release.wait()
+
+        async def wait_for_slot():
+            async with gate.slot():
+                return None
+
+        first = asyncio.create_task(occupy())
+        await active.wait()
+        second = asyncio.create_task(wait_for_slot())
+        await asyncio.sleep(0)
+
+        with pytest.raises(WorkQueueFull):
+            async with gate.slot():
+                pass
+
+        release.set()
+        await asyncio.gather(first, second)
+
+    asyncio.run(exercise())
+
+
+def test_cancelled_request_keeps_slot_until_worker_stops(monkeypatch):
+    async def exercise():
+        gate = WorkGate(active_limit=1, waiting_limit=0)
+        started = asyncio.Event()
+        release = asyncio.Event()
+        request = SimpleNamespace(
+            app=SimpleNamespace(state=SimpleNamespace(work_gate=gate))
+        )
+
+        async def controlled_worker(function, *args):
+            started.set()
+            await release.wait()
+            return function(*args)
+
+        monkeypatch.setattr(asyncio, "to_thread", controlled_worker)
+
+        task = asyncio.create_task(_run_ai_work(request, lambda: None))
+        await started.wait()
+        task.cancel()
+        await asyncio.sleep(0.01)
+
+        assert not task.done()
+        with pytest.raises(WorkQueueFull):
+            async with gate.slot():
+                pass
+
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        async with gate.slot():
+            pass
+
+    asyncio.run(exercise())
+
+
+def test_timed_out_worker_keeps_slot_until_it_stops(monkeypatch):
+    async def exercise():
+        gate = WorkGate(active_limit=1, waiting_limit=0)
+        started = asyncio.Event()
+        release = asyncio.Event()
+        request = SimpleNamespace(
+            app=SimpleNamespace(state=SimpleNamespace(work_gate=gate))
+        )
+
+        async def controlled_worker(function, *args):
+            started.set()
+            await release.wait()
+            return function(*args)
+
+        monkeypatch.setattr(asyncio, "to_thread", controlled_worker)
+        task = asyncio.create_task(
+            _run_ai_work(request, lambda: None, timeout_seconds=0.01)
+        )
+        await started.wait()
+
+        with pytest.raises(web_app.HTTPException) as error:
+            await task
+        assert error.value.status_code == 504
+        with pytest.raises(WorkQueueFull):
+            async with gate.slot():
+                pass
+
+        release.set()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        async with gate.slot():
+            pass
 
     asyncio.run(exercise())
 

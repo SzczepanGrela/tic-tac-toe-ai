@@ -52,8 +52,28 @@ def test_smokecheck_validates_health_assets_and_real_move(monkeypatch) -> None:
                     "agents": {"rules": "ready", "minimax": "ready"},
                 }
             )
+        if "/api/agents?" in url:
+            return response(
+                {
+                    "revision": REVISION,
+                    "agents": [
+                        {"id": "random", "available": True},
+                        {"id": "rules", "available": True},
+                        {"id": "dqn", "available": False},
+                    ],
+                }
+            )
         if url.endswith("/api/move"):
-            return response({"move": {"row": 1, "column": 1, "player": 1}})
+            body = json.loads(request.data)
+            size = body.get("board_size", 3)
+            win_length = body.get("win_length", 3)
+            return response(
+                {
+                    "move": {"row": 1, "column": 1, "player": 1},
+                    "board_size": size,
+                    "win_length": win_length,
+                }
+            )
         return response(b"x")
 
     monkeypatch.setattr(smokecheck, "_open", fake_open)
@@ -66,8 +86,10 @@ def test_smokecheck_validates_health_assets_and_real_move(monkeypatch) -> None:
 
     assert requested == [
         ("GET", "https://tictactoe.example/api/health"),
+        ("GET", "https://tictactoe.example/api/agents?board_size=10&win_length=5"),
         ("GET", "https://tictactoe.example/"),
         ("GET", "https://tictactoe.example/static/favicon.svg"),
+        ("POST", "https://tictactoe.example/api/move"),
         ("POST", "https://tictactoe.example/api/move"),
     ]
 

@@ -70,6 +70,27 @@ def check_release(
     if any(state != "ready" for state in agents.values()):
         raise ValueError("at least one agent is not ready")
 
+    capabilities_request = urllib.request.Request(
+        _url(base_url, "/api/agents?board_size=10&win_length=5"),
+        headers={
+            "Cache-Control": "no-cache",
+            "User-Agent": "tic-tac-toe-release-smokecheck",
+        },
+    )
+    capabilities = _read_json(capabilities_request, timeout)
+    if capabilities.get("revision") != expected_revision:
+        raise ValueError("capability revision does not match the expected release")
+    agent_capabilities = capabilities.get("agents")
+    if not isinstance(agent_capabilities, list):
+        raise ValueError("capability response has no agent list")
+    available = {
+        item.get("id")
+        for item in agent_capabilities
+        if isinstance(item, Mapping) and item.get("available") is True
+    }
+    if available != {"random", "rules"}:
+        raise ValueError("larger-board agent capabilities are incorrect")
+
     for path in ("/", "/static/favicon.svg"):
         request = urllib.request.Request(
             _url(base_url, path),
@@ -79,24 +100,47 @@ def check_release(
             if response.status != 200 or not response.read(1):
                 raise ValueError(f"{path} is not available")
 
-    move_request = urllib.request.Request(
-        _url(base_url, "/api/move"),
-        data=json.dumps(
+    variants = (
+        (3, 3, {"algorithm": "rules", "seed": 1}),
+        (
+            10,
+            5,
             {
-                "board": [[0, 0, 0], [0, 0, 0], [0, 0, 0]],
                 "algorithm": "rules",
                 "seed": 1,
-            }
-        ).encode(),
-        headers={
-            "Content-Type": "application/json",
-            "User-Agent": "tic-tac-toe-release-smokecheck",
-        },
-        method="POST",
+                "board_size": 10,
+                "win_length": 5,
+            },
+        ),
     )
-    move = _read_json(move_request, timeout)
-    if not isinstance(move.get("move"), Mapping):
-        raise ValueError("move endpoint returned no move")
+    for board_size, win_length, parameters in variants:
+        move_request = urllib.request.Request(
+            _url(base_url, "/api/move"),
+            data=json.dumps(
+                {
+                    "board": [[0] * board_size for _ in range(board_size)],
+                    **parameters,
+                }
+            ).encode(),
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "tic-tac-toe-release-smokecheck",
+            },
+            method="POST",
+        )
+        payload = _read_json(move_request, timeout)
+        move = payload.get("move")
+        if not isinstance(move, Mapping):
+            raise ValueError("move endpoint returned no move")
+        if payload.get("board_size") != board_size or payload.get("win_length") != win_length:
+            raise ValueError("move endpoint returned different rules")
+        row, column = move.get("row"), move.get("column")
+        if not isinstance(row, int) or not isinstance(column, int):
+            raise ValueError("move endpoint returned invalid coordinates")
+        if not 0 <= row < board_size or not 0 <= column < board_size:
+            raise ValueError("move endpoint returned an out-of-bounds move")
+        if move.get("player") != 1:
+            raise ValueError("move endpoint returned the wrong starting player")
 
 
 def main() -> int:

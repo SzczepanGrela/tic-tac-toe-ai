@@ -33,6 +33,8 @@
       </nav>
 
       <div class="settings">
+        <label><span data-i18n="boardSize">Board size</span><select id="board-size" disabled></select></label>
+        <label><span data-i18n="winLength">Marks to win</span><select id="win-length" disabled></select></label>
         <label id="human-agent-field"><span data-i18n="opponent">Opponent</span><select id="human-agent"></select></label>
         <label class="ai-field"><span data-i18n="xAgent">X agent</span><select id="x-agent"></select></label>
         <label class="ai-field"><span data-i18n="oAgent">O agent</span><select id="o-agent"></select></label>
@@ -43,7 +45,7 @@
 
       <div id="algorithm-note" class="algorithm-note"></div>
       <div id="status" class="status" role="status" aria-live="polite">Ready</div>
-      <div id="board" class="board" aria-label="Tic-Tac-Toe board" data-i18n-aria="board"></div>
+      <div class="board-scroll"><div id="board" class="board" aria-label="Tic-Tac-Toe board" data-i18n-aria="board"></div></div>
 
       <div id="replay-controls" class="replay-controls hidden">
         <button id="pause" data-i18n="pause">Pause</button>
