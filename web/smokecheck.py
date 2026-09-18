@@ -36,12 +36,7 @@ def _read_json(
     return payload
 
 
-def check_release(
-    base_url: str,
-    expected_revision: str,
-    *,
-    timeout: int = DEFAULT_TIMEOUT_SECONDS,
-) -> None:
+def _validate_inputs(base_url: str, expected_revision: str) -> None:
     parsed = urllib.parse.urlsplit(base_url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("base URL must be an absolute HTTP or HTTPS URL")
@@ -52,6 +47,13 @@ def check_release(
     if not REVISION_PATTERN.fullmatch(expected_revision):
         raise ValueError("expected revision must be a full lowercase commit SHA")
 
+
+def _check_health(
+    base_url: str,
+    expected_revision: str,
+    *,
+    timeout: int,
+) -> None:
     health_request = urllib.request.Request(
         _url(base_url, "/api/health"),
         headers={
@@ -69,6 +71,40 @@ def check_release(
         raise ValueError("health response has no agent state")
     if any(state != "ready" for state in agents.values()):
         raise ValueError("at least one agent is not ready")
+
+
+def _check_assets(base_url: str, *, timeout: int) -> None:
+    for path in ("/", "/static/favicon.svg"):
+        request = urllib.request.Request(
+            _url(base_url, path),
+            headers={"User-Agent": "tic-tac-toe-release-smokecheck"},
+        )
+        with _open(request, timeout) as response:
+            if response.status != 200 or not response.read(1):
+                raise ValueError(f"{path} is not available")
+
+
+def check_baseline_release(
+    base_url: str,
+    expected_revision: str,
+    *,
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+) -> None:
+    """Check the stable contract shared by current and earlier releases."""
+    _validate_inputs(base_url, expected_revision)
+    _check_health(base_url, expected_revision, timeout=timeout)
+    _check_assets(base_url, timeout=timeout)
+
+
+def check_release(
+    base_url: str,
+    expected_revision: str,
+    *,
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+) -> None:
+    """Check the complete contract implemented by this source revision."""
+    _validate_inputs(base_url, expected_revision)
+    _check_health(base_url, expected_revision, timeout=timeout)
 
     capabilities_request = urllib.request.Request(
         _url(base_url, "/api/agents?board_size=10&win_length=5"),
@@ -91,14 +127,7 @@ def check_release(
     if available != {"random", "rules"}:
         raise ValueError("larger-board agent capabilities are incorrect")
 
-    for path in ("/", "/static/favicon.svg"):
-        request = urllib.request.Request(
-            _url(base_url, path),
-            headers={"User-Agent": "tic-tac-toe-release-smokecheck"},
-        )
-        with _open(request, timeout) as response:
-            if response.status != 200 or not response.read(1):
-                raise ValueError(f"{path} is not available")
+    _check_assets(base_url, timeout=timeout)
 
     variants = (
         (3, 3, {"algorithm": "rules", "seed": 1}),

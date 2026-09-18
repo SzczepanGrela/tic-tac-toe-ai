@@ -149,6 +149,11 @@ def prepare_release(
         "verify_image_revision",
         lambda image, revision: images.append((image, revision)),
     )
+    monkeypatch.setattr(
+        release.smokecheck,
+        "check_baseline_release",
+        lambda *args: None,
+    )
     monkeypatch.setattr(release.time, "sleep", lambda interval: None)
     return arguments(contract_path), images
 
@@ -216,13 +221,19 @@ def test_an_existing_deployment_stops_before_any_mutation(
     assert client.queued == []
 
 
-def test_successful_rollout_verifies_and_smoke_tests_exact_revisions(
+def test_successful_rollout_uses_compatible_preflight_and_current_smoke(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     client = FakeClient(contract(), [["queued", "finished"]])
     args, images = prepare_release(monkeypatch, tmp_path, client)
+    baseline_revisions: list[str] = []
     smoke_revisions: list[str] = []
+    monkeypatch.setattr(
+        release.smokecheck,
+        "check_baseline_release",
+        lambda base_url, revision: baseline_revisions.append(revision),
+    )
     monkeypatch.setattr(
         release.smokecheck,
         "check_release",
@@ -238,7 +249,8 @@ def test_successful_rollout_verifies_and_smoke_tests_exact_revisions(
     assert images == [
         ("ghcr.io/example/tic-tac-toe-ai@" + OLD_DIGEST, OLD_REVISION)
     ]
-    assert smoke_revisions == [OLD_REVISION, NEW_REVISION]
+    assert baseline_revisions == [OLD_REVISION]
+    assert smoke_revisions == [NEW_REVISION]
 
 
 def test_successful_rollout_waits_for_delayed_application_health(
@@ -329,7 +341,13 @@ def test_failed_candidate_deployment_restores_the_previous_digest(
         [["queued", "failed"], ["queued", "finished"]],
     )
     args, _ = prepare_release(monkeypatch, tmp_path, client)
+    baseline_revisions: list[str] = []
     smoke_revisions: list[str] = []
+    monkeypatch.setattr(
+        release.smokecheck,
+        "check_baseline_release",
+        lambda base_url, revision: baseline_revisions.append(revision),
+    )
     monkeypatch.setattr(
         release.smokecheck,
         "check_release",
@@ -345,7 +363,8 @@ def test_failed_candidate_deployment_restores_the_previous_digest(
     ]
     assert client.queued == [DEPLOYMENT_UUID, ROLLBACK_UUID]
     assert client.live_revision == OLD_REVISION
-    assert smoke_revisions == [OLD_REVISION, OLD_REVISION]
+    assert baseline_revisions == [OLD_REVISION, OLD_REVISION]
+    assert smoke_revisions == []
 
 
 def test_uncertain_deployment_request_does_not_attempt_a_second_mutation(
