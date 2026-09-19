@@ -107,7 +107,7 @@ def check_release(
     _check_health(base_url, expected_revision, timeout=timeout)
 
     capabilities_request = urllib.request.Request(
-        _url(base_url, "/api/agents?board_size=10&win_length=5"),
+        _url(base_url, "/api/agents?board_size=9&win_length=5"),
         headers={
             "Cache-Control": "no-cache",
             "User-Agent": "tic-tac-toe-release-smokecheck",
@@ -132,12 +132,12 @@ def check_release(
     variants = (
         (3, 3, {"algorithm": "rules", "seed": 1}),
         (
-            10,
+            9,
             5,
             {
                 "algorithm": "rules",
                 "seed": 1,
-                "board_size": 10,
+                "board_size": 9,
                 "win_length": 5,
             },
         ),

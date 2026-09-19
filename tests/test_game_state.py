@@ -25,7 +25,7 @@ def test_detects_draw_and_rejects_illegal_moves():
 
 
 def test_clone_is_independent_and_preserves_rules_and_last_move():
-    state = GameState(7, 5)
+    state = GameState(9, 5)
     assert state.make_move(3, 3)
     clone = state.clone()
     clone.make_move(3, 4)
@@ -37,7 +37,7 @@ def test_clone_is_independent_and_preserves_rules_and_last_move():
 
 @pytest.mark.parametrize(
     "board_size,win_length",
-    [(board_size, win_length) for board_size in range(3, 11) for win_length in range(3, board_size + 1)],
+    [(board_size, win_length) for board_size in GameRules.SUPPORTED_BOARD_SIZES for win_length in range(3, board_size + 1)],
 )
 def test_every_supported_variant_detects_a_horizontal_win(board_size, win_length):
     board = np.zeros((board_size, board_size), dtype=int)
@@ -54,9 +54,9 @@ def test_every_supported_variant_detects_a_horizontal_win(board_size, win_length
 
 @pytest.mark.parametrize("direction", [(1, 1), (1, -1)])
 def test_detects_off_centre_diagonal_segments(direction):
-    rules = GameRules(7, 4)
-    board = np.zeros((7, 7), dtype=int)
-    start = (1, 1) if direction == (1, 1) else (1, 5)
+    rules = GameRules(5, 4)
+    board = np.zeros((5, 5), dtype=int)
+    start = (1, 1) if direction == (1, 1) else (1, 3)
     segment = tuple(
         (start[0] + offset * direction[0], start[1] + offset * direction[1])
         for offset in range(4)
@@ -104,7 +104,7 @@ def test_longer_line_reports_overlapping_winning_segments():
 
 
 def test_reset_clears_last_move_and_board():
-    state = GameState(4, 3)
+    state = GameState(5, 3)
     state.make_move(1, 1)
     state.reset_board()
 
@@ -115,6 +115,11 @@ def test_reset_clears_last_move_and_board():
 
 @pytest.mark.parametrize("board_size,win_length", [
     (2, 2),
+    (4, 3),
+    (6, 3),
+    (7, 3),
+    (8, 3),
+    (10, 3),
     (11, 3),
     (3, 2),
     (3, 4),

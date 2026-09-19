@@ -46,7 +46,7 @@ def test_registry_health_reports_every_agent_ready():
 def test_registry_reports_variant_capabilities():
     registry = AgentRegistry()
     classic = {item["id"]: item for item in registry.capabilities(GameRules())}
-    larger = {item["id"]: item for item in registry.capabilities(GameRules(10, 5))}
+    larger = {item["id"]: item for item in registry.capabilities(GameRules(9, 5))}
 
     assert all(item["available"] for item in classic.values())
     assert classic["rules"]["policy_version"] == "rules-v2"
@@ -67,7 +67,7 @@ def test_registry_reports_variant_capabilities():
 
 @pytest.mark.parametrize(
     "board_size,win_length",
-    [(board_size, win_length) for board_size in range(3, 11) for win_length in range(3, board_size + 1)],
+    [(board_size, win_length) for board_size in GameRules.SUPPORTED_BOARD_SIZES for win_length in range(3, board_size + 1)],
 )
 def test_rules_agent_returns_legal_move_for_every_variant(board_size, win_length):
     state = GameState(board_size, win_length)
@@ -77,8 +77,8 @@ def test_rules_agent_returns_legal_move_for_every_variant(board_size, win_length
 
 
 def test_rules_agent_wins_and_blocks_on_larger_board():
-    winning = GameState(10, 5)
-    blocking = GameState(10, 5)
+    winning = GameState(9, 5)
+    blocking = GameState(9, 5)
     for column in range(4):
         winning.board[4, column] = 1
         blocking.board[4, column] = -1
@@ -87,8 +87,8 @@ def test_rules_agent_wins_and_blocks_on_larger_board():
     assert find_rules_move(blocking, random.Random(1)) == (4, 4)
 
 
-def test_rules_agent_uses_one_of_the_even_board_centres():
-    state = GameState(4, 3)
+def test_rules_agent_uses_the_largest_board_centre():
+    state = GameState(9, 5)
     move = find_rules_move(state, random.Random(42))
 
-    assert move in {(1, 1), (1, 2), (2, 1), (2, 2)}
+    assert move == (4, 4)

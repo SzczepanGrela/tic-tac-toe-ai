@@ -33,9 +33,10 @@ def test_agent_capabilities_are_scoped_to_rules():
     assert all(agent["policy_version"] for agent in classic["agents"])
     assert all(agent["work_profile"] for agent in classic["agents"])
 
-    larger = request("GET", "/api/agents?board_size=10&win_length=5").json()
+    larger = request("GET", "/api/agents?board_size=9&win_length=5").json()
     available = {agent["id"] for agent in larger["agents"] if agent["available"]}
     assert available == {"random", "rules"}
+    assert request("GET", "/api/agents?board_size=4&win_length=3").status_code == 422
     assert request("GET", "/api/agents?board_size=11&win_length=5").status_code == 422
 
 
@@ -64,12 +65,12 @@ def test_move_supports_every_agent():
 
 def test_larger_move_requires_complete_rules_and_supported_agent(monkeypatch):
     monkeypatch.setattr(web_app, "move_limiter", TokenBucket(100, 100))
-    board = [[0] * 10 for _ in range(10)]
+    board = [[0] * 9 for _ in range(9)]
 
     incomplete = request(
         "POST",
         "/api/move",
-        json={"board": board, "algorithm": "random", "board_size": 10},
+        json={"board": board, "algorithm": "random", "board_size": 9},
     )
     assert incomplete.status_code == 422
 
@@ -79,7 +80,7 @@ def test_larger_move_requires_complete_rules_and_supported_agent(monkeypatch):
         json={
             "board": board,
             "algorithm": "dqn",
-            "board_size": 10,
+            "board_size": 9,
             "win_length": 5,
         },
     )
@@ -91,16 +92,16 @@ def test_larger_move_requires_complete_rules_and_supported_agent(monkeypatch):
         json={
             "board": board,
             "algorithm": "random",
-            "board_size": 10,
+            "board_size": 9,
             "win_length": 5,
             "seed": 7,
         },
     )
     assert supported.status_code == 200
-    assert supported.json()["board_size"] == 10
+    assert supported.json()["board_size"] == 9
     assert supported.json()["win_length"] == 5
-    assert 0 <= supported.json()["move"]["row"] < 10
-    assert 0 <= supported.json()["move"]["column"] < 10
+    assert 0 <= supported.json()["move"]["row"] < 9
+    assert 0 <= supported.json()["move"]["column"] < 9
 
 
 def test_move_rejects_coerced_board_values():
@@ -164,7 +165,7 @@ def test_match_rejects_larger_synchronous_series():
             "x_algorithm": "random",
             "o_algorithm": "random",
             "games": 1,
-            "board_size": 4,
+            "board_size": 5,
             "win_length": 3,
         },
     )

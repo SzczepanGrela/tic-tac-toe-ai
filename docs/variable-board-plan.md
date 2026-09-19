@@ -1,8 +1,16 @@
 # Variable-board implementation plan
 
-Status: implemented and validated locally and in CI on 2026-09-18; review,
-merge and production release remain open. The measurements in this file are
-development-machine observations unless explicitly described as targets.
+Status: the initial variable-board release was reviewed, merged, and deployed
+to production on 2026-09-18. The focused-size follow-up was implemented on
+2026-09-20 and still requires review and the normal production release. The
+measurements in this file are development-machine observations unless
+explicitly described as targets.
+
+Product scope update (2026-09-20): after the initial 3×3–10×10 release was
+validated, the operator narrowed the public board-size choices to 3×3, 5×5,
+and 9×9 for a clearer interface. References below to all 36 variants record
+the broader implementation and its historical validation; they do not describe
+the current public input contract.
 
 ## Scope and proposed rules
 
@@ -71,13 +79,13 @@ G05, J01 and T01 do not block the first release.
 
 | ID | Status | Task | Depends on | Completion condition / evidence |
 | --- | --- | --- | --- | --- |
-| G01 | local-complete (2026-09-18) | Rules and engine | none | Strict rules and board validation; all 36 `(N,K)` variants, terminal consistency and original cases covered. |
-| G02 | local-complete (2026-09-18) | API contract and agent capabilities | G01 | Rules propagated; incompatible agents return 422; absent fields retain 3×3; capabilities include revision, policy and work profile. |
-| G03 | local-complete (2026-09-18) | Variable board, controls and incremental series | G02 | Dynamic 3×3–10×10 UI, SVG result marker, keyboard navigation, cancellation, paced incremental series, calculation pause/step and replay covered by browser tests. |
-| G04 | local-complete (2026-09-18) | General Rules agent | G01, G02 | All variants enabled; wins, blocks, centre selection and legal moves tested; 2,160-sample development benchmark passed. |
+| G01 | complete (2026-09-18) | Rules and engine | none | Strict rules and board validation; all 36 `(N,K)` variants, terminal consistency and original cases covered. |
+| G02 | complete (2026-09-18) | API contract and agent capabilities | G01 | Rules propagated; incompatible agents return 422; absent fields retain 3×3; capabilities include revision, policy and work profile. |
+| G03 | complete (2026-09-18) | Variable board, controls and incremental series | G02 | Dynamic 3×3–10×10 UI, SVG result marker, keyboard navigation, cancellation, paced incremental series, calculation pause/step and replay covered by browser tests. |
+| G04 | complete (2026-09-18) | General Rules agent | G01, G02 | All variants enabled; wins, blocks, centre selection and legal moves tested; 2,160-sample development benchmark passed. |
 | G05 | deferred | Larger-board MCTS | G01, G02, G04 | Optional; current MCTS remains 3×3-only. |
-| G06 | local-complete (2026-09-18) | Resource limits and release validation | G03, G04; G05 if included | Queue, cancellation ownership, deadlines, larger smoke, Python 3.12 API suite and production-sized local container passed. CI remains part of G07. |
-| G07 | in-progress | Documentation and controlled release | G06 | Documentation and PR CI complete. Review, merge, approved digest deployment, public smoke and rollback check remain. |
+| G06 | complete (2026-09-18) | Resource limits and release validation | G03, G04; G05 if included | Queue, cancellation ownership, deadlines, larger smoke, Python 3.12 API suite and production-sized local container passed. |
+| G07 | complete (2026-09-18) | Documentation and controlled release | G06 | PRs #21 and #22 merged; protected digest deployment and public 3×3/10×10 smoke passed for revision `c71b9f91ab7b71834a660516ddb2fac770e866ae`. |
 | J01 | deferred | Optional Jev integration | G02, G03, G06 | Provider adapter, service isolation, cost limits and per-variant evaluation require separate acceptance. |
 | T01 | deferred | Optional learned policies for larger boards | G01, G04, G06 | Architecture, training budget, teacher/rewards and promotion criteria require a separate project. |
 
@@ -293,6 +301,6 @@ work, larger games produce valid replay/outcomes, and bounded concurrent load
 does not compromise application readiness. Larger-board MCTS, Jev and new
 training are independently tracked follow-ups.
 
-As of 2026-09-18 this definition is not yet satisfied: G01-G04 and G06 are
-complete through CI, while G07 still needs review, merge and the controlled
-production release.
+The initial release definition was satisfied on 2026-09-18. The later product
+decision to expose only 3×3, 5×5, and 9×9 does not invalidate the broader
+engine evidence; it narrows the supported public input contract.

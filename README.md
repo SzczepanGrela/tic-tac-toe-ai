@@ -19,7 +19,7 @@ The trained agents are pure policies: no hidden win/block heuristic is applied d
 
 ## Web application
 
-The interface supports Human vs AI, local Player vs Player, and AI vs AI series. Boards range from 3×3 through 10×10, with a configurable winning line from 3 marks through the board size. A newly selected size defaults to `min(size, 5)` marks in a row. AI matches include deterministic seeds, complete move replays, pause/resume, single-step playback, five speeds, and aggregate results. English/Polish language and light/dark theme preferences are stored in first-party cookies.
+The interface supports Human vs AI, local Player vs Player, and AI vs AI series. The focused board sizes are 3×3, 5×5, and 9×9, with a configurable winning line from 3 marks through the board size. A newly selected size defaults to `min(size, 5)` marks in a row. AI matches include deterministic seeds, complete move replays, pause/resume, single-step playback, five speeds, and aggregate results. English/Polish language and light/dark theme preferences are stored in first-party cookies.
 
 Random and Rules support every board variant. Minimax, MCTS, Q-learning, DQN,
 Imitation, and REINFORCE remain available for classic 3×3 only. The interface
