@@ -1,4 +1,5 @@
 const AGENT_IDS = ['random', 'rules', 'minimax', 'mcts', 'q_learning', 'dqn', 'imitation', 'reinforce'];
+const BOARD_SIZES = [3, 5, 9];
 const SUPPORTED_LANGUAGES = ['en', 'pl'];
 const SUPPORTED_THEMES = ['light', 'dark'];
 const $ = selector => document.querySelector(selector);
@@ -65,7 +66,7 @@ function selectedRules() {
 }
 
 function populateBoardSizes() {
-  for (let size = 3; size <= 10; size++) {
+  for (const size of BOARD_SIZES) {
     $('#board-size').add(new Option(`${size}×${size}`, String(size)));
   }
   $('#board-size').value = '3';

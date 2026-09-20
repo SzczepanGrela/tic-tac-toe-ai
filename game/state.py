@@ -24,16 +24,14 @@ class GameRules:
     board_size: int = 3
     win_length: int = 3
 
-    MIN_BOARD_SIZE = 3
-    MAX_BOARD_SIZE = 10
+    SUPPORTED_BOARD_SIZES = (3, 5, 9)
 
     def __post_init__(self) -> None:
         board_size = _strict_int(self.board_size, "board_size")
         win_length = _strict_int(self.win_length, "win_length")
-        if not self.MIN_BOARD_SIZE <= board_size <= self.MAX_BOARD_SIZE:
-            raise ValueError(
-                f"board_size must be between {self.MIN_BOARD_SIZE} and {self.MAX_BOARD_SIZE}"
-            )
+        if board_size not in self.SUPPORTED_BOARD_SIZES:
+            supported = ", ".join(str(size) for size in self.SUPPORTED_BOARD_SIZES)
+            raise ValueError(f"board_size must be one of: {supported}")
         if not 3 <= win_length <= board_size:
             raise ValueError("win_length must be between 3 and board_size")
         object.__setattr__(self, "board_size", board_size)

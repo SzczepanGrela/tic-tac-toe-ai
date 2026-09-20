@@ -86,7 +86,7 @@ def test_smokecheck_validates_health_assets_and_real_move(monkeypatch) -> None:
 
     assert requested == [
         ("GET", "https://tictactoe.example/api/health"),
-        ("GET", "https://tictactoe.example/api/agents?board_size=10&win_length=5"),
+        ("GET", "https://tictactoe.example/api/agents?board_size=9&win_length=5"),
         ("GET", "https://tictactoe.example/"),
         ("GET", "https://tictactoe.example/static/favicon.svg"),
         ("POST", "https://tictactoe.example/api/move"),

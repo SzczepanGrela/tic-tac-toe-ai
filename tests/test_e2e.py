@@ -25,17 +25,17 @@ def test_winning_line_appears_for_completed_game(page, live_server_url):
     expect(page.locator(".winning-line.row-0")).to_be_visible()
 
 
-def test_ten_by_ten_local_game_detects_an_off_center_win(page, live_server_url):
+def test_nine_by_nine_local_game_detects_an_off_center_win(page, live_server_url):
     page.goto(live_server_url)
     page.get_by_role("button", name="Local players").click()
-    page.locator("#board-size").select_option("10")
+    page.locator("#board-size").select_option("9")
 
     expect(page.locator("#win-length")).to_have_value("5")
-    expect(page.locator(".cell")).to_have_count(100)
+    expect(page.locator(".cell")).to_have_count(81)
     page.locator(".cell").first.focus()
     page.keyboard.press("ArrowRight")
     page.keyboard.press("ArrowDown")
-    expect(page.locator(".cell").nth(11)).to_be_focused()
+    expect(page.locator(".cell").nth(10)).to_be_focused()
     for index in (12, 0, 13, 1, 14, 3, 15, 4, 16):
         page.locator(".cell").nth(index).click()
 
@@ -45,7 +45,9 @@ def test_ten_by_ten_local_game_detects_an_off_center_win(page, live_server_url):
 
 def test_larger_board_disables_classic_only_agents(page, live_server_url):
     page.goto(live_server_url)
-    page.locator("#board-size").select_option("4")
+    expect(page.locator("#board-size option")).to_have_count(3)
+    expect(page.locator("#board-size option")).to_have_text(["3×3", "5×5", "9×9"])
+    page.locator("#board-size").select_option("5")
 
     expect(page.locator("#human-agent option[value=dqn]")).to_have_attribute("disabled", "")
     expect(page.locator("#human-agent option[value=random]")).not_to_have_attribute("disabled", "")
@@ -115,7 +117,7 @@ def test_larger_ai_series_uses_incremental_moves_and_replays(page, live_server_u
     page.route("**/api/move", choose_first_legal)
     page.goto(live_server_url)
     page.get_by_role("button", name="AI vs AI").click()
-    page.locator("#board-size").select_option("4")
+    page.locator("#board-size").select_option("5")
     page.locator("#x-agent").select_option("random")
     page.locator("#o-agent").select_option("rules")
     page.locator("#series-count").select_option("1")
@@ -123,11 +125,11 @@ def test_larger_ai_series_uses_incremental_moves_and_replays(page, live_server_u
     page.get_by_role("button", name="Run series").click()
 
     page.locator("#scoreboard:not(.hidden)").wait_for()
-    expect(page.locator("#series-meta")).to_contain_text("4×4, 4 in a row")
-    expect(page.locator(".cell")).to_have_count(16)
+    expect(page.locator("#series-meta")).to_contain_text("5×5, 5 in a row")
+    expect(page.locator(".cell")).to_have_count(25)
     assert requests
-    assert all(request["board_size"] == 4 for request in requests)
-    assert all(request["win_length"] == 4 for request in requests)
+    assert all(request["board_size"] == 5 for request in requests)
+    assert all(request["win_length"] == 5 for request in requests)
 
 
 def test_larger_series_pause_and_step_control_move_requests(page, live_server_url):
@@ -155,7 +157,7 @@ def test_larger_series_pause_and_step_control_move_requests(page, live_server_ur
     """)
     page.goto(live_server_url)
     page.get_by_role("button", name="AI vs AI").click()
-    page.locator("#board-size").select_option("4")
+    page.locator("#board-size").select_option("5")
     page.locator("#x-agent").select_option("random")
     page.locator("#o-agent").select_option("rules")
     page.locator("#series-count").select_option("1")
