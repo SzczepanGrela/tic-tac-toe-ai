@@ -6,7 +6,7 @@ import httpx2
 import pytest
 from typesafe_sdk import AsyncTypeSafeClient, RetryPolicy
 
-from ai.jev import JevError, JevService
+from ai.jev import JevError, JevService, PROMPT_VERSION
 from game.state import GameRules, GameState
 from web.jev_budget import BudgetLedger, MODEL, RESERVATION, MONTHLY_LIMIT, LedgerUnavailable
 
@@ -40,7 +40,21 @@ def test_real_sdk_contract_and_accounting_for_every_variant(ledger, size, length
         payload = json.loads(request.content)
         requests.append(payload)
         assert payload["model"] == MODEL
+        assert payload["state"]["board_size"] == size
+        assert payload["state"]["marks_to_win"] == length
+        assert payload["state"]["player_to_move"] == "X"
+        assert payload["state"]["opponent"] == "O"
+        assert payload["state"]["cell_symbols"]["."] == "An empty cell where the current player may move."
+        assert payload["state"]["coordinate_system"]["row_origin"] == 1
+        instructions = payload["questions"]["move"]["instructions"]
+        assert any("`board_rows`" in item for item in instructions["inspect"])
+        assert any("best achievable game result" in item for item in instructions["decision_objective"])
+        assert any("best for them" in item for item in instructions["decision_objective"])
+        assert instructions["output_constraint"].startswith("Return exactly one option")
         assert len(payload["questions"]["move"]["criteria"]) == size * size
+        assert payload["questions"]["move"]["criteria"]["r1c1"] == (
+            "Place X in the currently empty legal cell at row 1, column 1."
+        )
         return httpx2.Response(200, json=response_for(payload))
     async def exercise():
         service = JevService(client_with_handler(handler), ledger)
@@ -48,12 +62,27 @@ def test_real_sdk_contract_and_accounting_for_every_variant(ledger, size, length
             move, metadata = await service.select_move(GameState(rules=GameRules(size, length)))
             assert move == (0, 0)
             assert metadata["model"] == MODEL
+            assert metadata["prompt_version"] == PROMPT_VERSION == "jev-game-v2"
             assert not metadata["seed_reproducible"]
             assert ledger.status()["used_nano_usd"] == 4200
         finally:
             await service.aclose()
     asyncio.run(exercise())
     assert len(requests) == 1
+
+
+def test_prompt_identifies_o_as_the_player_and_x_as_the_opponent():
+    state = GameState.from_board([[1, 0, 0], [0, 0, 0], [0, 0, 0]])
+
+    context, questions, moves = JevService.question(state)
+
+    assert context["player_to_move"] == "O"
+    assert context["opponent"] == "X"
+    assert context["board_rows"] == ["X . .", ". . .", ". . ."]
+    assert set(questions["move"].criteria) == set(moves)
+    assert questions["move"].criteria["r1c2"] == (
+        "Place O in the currently empty legal cell at row 1, column 2."
+    )
 
 
 @pytest.mark.parametrize("status", [401, 429, 529, 500])

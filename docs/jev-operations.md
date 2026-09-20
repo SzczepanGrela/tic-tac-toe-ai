@@ -8,8 +8,12 @@ MCTS can ship first with `JEV_ENABLED=false` (the default).
 ## Contract and availability
 
 The official `typesafe-sdk==0.7.0` async client uses pinned model `jev-1.13.0`
-and prompt `jev-game-v1`. A Choice contains every legal empty cell, with
-explicit board, side to move and winning rules. Supports 3×3 K=3, 5×5 K=3–5,
+and prompt `jev-game-v2`. The structured state names the board size, required
+line length, side to move, opponent, complete board, cell symbols and 1-based
+coordinates. The structured Choice instructions define the game, first-win
+termination, result preference, adversarial opponent and tactical priorities.
+Its criteria contain every legal empty cell and identify the mark being placed;
+facts are not duplicated as an interpolated text board. Supports 3×3 K=3, 5×5 K=3–5,
 9×9 K=3–9. At most 81 options fit the provider's 255-option contract.
 There is one request per non-forced move, zero SDK retries and no response cache.
 A single legal cell needs no provider call. There is no local-agent fallback.

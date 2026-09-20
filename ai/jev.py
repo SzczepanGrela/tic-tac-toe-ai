@@ -16,7 +16,7 @@ from typesafe_sdk import (
 from game.state import GameState
 from web.jev_budget import BudgetExhausted, BudgetLedger, DEFAULT_PATH, LedgerUnavailable, MODEL
 
-PROMPT_VERSION = "jev-game-v1"
+PROMPT_VERSION = "jev-game-v2"
 POLICY_VERSION = f"{MODEL}:{PROMPT_VERSION}"
 logger = logging.getLogger(__name__)
 
@@ -106,19 +106,65 @@ class JevService:
     def question(state: GameState) -> tuple[dict, dict, dict]:
         moves = {f"r{r + 1}c{c + 1}": (r, c) for r, c in state.get_available_moves()}
         symbols = {1: "X", -1: "O", 0: "."}
+        player = symbols[state.current_player]
+        opponent = symbols[-state.current_player]
         context = {
             "board_size": state.board_size, "marks_to_win": state.win_length,
-            "player_to_move": symbols[state.current_player],
+            "player_to_move": player, "opponent": opponent,
             "board_rows": [" ".join(symbols[int(cell)] for cell in row) for row in state.board],
-            "coordinates": "Rows and columns start at 1. Dot means empty.",
+            "cell_symbols": {
+                "X": "A cell occupied by player X.",
+                "O": "A cell occupied by player O.",
+                ".": "An empty cell where the current player may move.",
+            },
+            "coordinate_system": {
+                "row_origin": 1, "column_origin": 1,
+                "meaning": "Rows increase from top to bottom; columns increase from left to right.",
+            },
         }
         question = Choice(
-            instructions=("Choose the best legal move for player_to_move in this tic-tac-toe position. "
-                          "Players alternate, X starts. At least marks_to_win consecutive marks "
-                          "horizontally, vertically or diagonally win. Longer lines also win. "
-                          "Aim to win and prevent the opponent from winning; the game ends at the first win. "
-                          "A full board without a winner is a draw. Choose exactly one listed empty cell."),
-            criteria={key: f"Place at row {r + 1}, column {c + 1}" for key, (r, c) in moves.items()},
+            instructions={
+                "question": (
+                    "Which provided legal move should `player_to_move` choose in this tic-tac-toe position?"
+                ),
+                "inspect": [
+                    "`board_size` and `marks_to_win`",
+                    "`player_to_move` and `opponent`",
+                    "the complete current position in `board_rows`",
+                    "`cell_symbols` and `coordinate_system`",
+                    "every legal move supplied in this question's criteria",
+                ],
+                "game_rules": [
+                    "The board is square: `board_size` rows by `board_size` columns.",
+                    "X moves first; X and O then alternate exactly one mark per turn.",
+                    (
+                        "A player wins immediately upon forming at least `marks_to_win` consecutive marks "
+                        "horizontally, vertically, or diagonally. A longer consecutive line also wins."
+                    ),
+                    "The game stops on its first winning move.",
+                    "A full board without a winning line is a draw.",
+                    "Every criterion is a currently empty legal cell; no unlisted move is legal.",
+                ],
+                "decision_objective": [
+                    "Choose the move with the best achievable game result for `player_to_move`.",
+                    "Prefer a forced win over a possible win, a possible win over a draw, and a draw over a loss.",
+                    "Assume `opponent` will respond with moves that are best for them.",
+                    "Take an immediate winning move when one exists.",
+                    (
+                        "If there is no immediate win, prevent an immediate opponent win whenever that is "
+                        "necessary to avoid losing."
+                    ),
+                    "Consider threats and responses beyond the next single move.",
+                ],
+                "output_constraint": "Return exactly one option from the supplied criteria.",
+            },
+            criteria={
+                key: (
+                    f"Place {player} in the currently empty legal cell at row {r + 1}, "
+                    f"column {c + 1}."
+                )
+                for key, (r, c) in moves.items()
+            },
         )
         return context, {"move": question}, moves
 
