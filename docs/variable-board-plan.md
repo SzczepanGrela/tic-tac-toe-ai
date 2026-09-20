@@ -1,10 +1,12 @@
 # Variable-board implementation plan
 
 Status: the initial variable-board release was reviewed, merged, and deployed
-to production on 2026-09-18. The focused-size follow-up was implemented on
-2026-09-20 and still requires review and the normal production release. The
-measurements in this file are development-machine observations unless
-explicitly described as targets.
+to production on 2026-09-18. The focused 3×3/5×5/9×9 follow-up was merged as
+PR #23 (`0e38480f17b7fd2c17fc0bb5f7a3dc4c58fd0488`) and passed Quality and
+protected deployment in run `35506078903`. On 2026-09-20, G05 and the J01 local
+implementation were prepared on `feature/mcts-jev`; their CI/release and Jev's
+operator activation remain pending. Measurements are development-machine
+observations unless explicitly described otherwise.
 
 Product scope update (2026-09-20): after the initial 3×3–10×10 release was
 validated, the operator narrowed the public board-size choices to 3×3, 5×5,
@@ -12,7 +14,7 @@ and 9×9 for a clearer interface. References below to all 36 variants record
 the broader implementation and its historical validation; they do not describe
 the current public input contract.
 
-## Scope and proposed rules
+## Original scope and rules (historical first-release plan)
 
 Support every square board size from 3x3 through 10x10 in local play,
 human-versus-agent play, and agent-versus-agent series. Availability depends on
@@ -83,10 +85,10 @@ G05, J01 and T01 do not block the first release.
 | G02 | complete (2026-09-18) | API contract and agent capabilities | G01 | Rules propagated; incompatible agents return 422; absent fields retain 3×3; capabilities include revision, policy and work profile. |
 | G03 | complete (2026-09-18) | Variable board, controls and incremental series | G02 | Dynamic 3×3–10×10 UI, SVG result marker, keyboard navigation, cancellation, paced incremental series, calculation pause/step and replay covered by browser tests. |
 | G04 | complete (2026-09-18) | General Rules agent | G01, G02 | All variants enabled; wins, blocks, centre selection and legal moves tested; 2,160-sample development benchmark passed. |
-| G05 | deferred | Larger-board MCTS | G01, G02, G04 | Optional; current MCTS remains 3×3-only. |
+| G05 | local-complete (2026-09-20), release pending | MCTS for 5×5 K=3/4/5 | G01, G02, G04 | Fixed 256-simulation profiles passed legal/tactical, seed, resource and >=90% non-loss-vs-Random gates; [measurements](mcts-5x5.md). 9×9 disabled. |
 | G06 | complete (2026-09-18) | Resource limits and release validation | G03, G04; G05 if included | Queue, cancellation ownership, deadlines, larger smoke, Python 3.12 API suite and production-sized local container passed. |
 | G07 | complete (2026-09-18) | Documentation and controlled release | G06 | PRs #21 and #22 merged; protected digest deployment and public 3×3/10×10 smoke passed for revision `c71b9f91ab7b71834a660516ddb2fac770e866ae`. |
-| J01 | deferred | Optional Jev integration | G02, G03, G06 | Provider adapter, service isolation, cost limits and per-variant evaluation require separate acceptance. |
+| J01 | partial (2026-09-20) | Optional Jev integration | G02, G03, G06 | Adapter/UI, durable spend control and mocked tests implemented; paid evaluation, mounted-ledger acceptance and public activation pending. See subtasks below. |
 | T01 | deferred | Optional learned policies for larger boards | G01, G04, G06 | Architecture, training budget, teacher/rewards and promotion criteria require a separate project. |
 
 ### G01 — Rules and engine
@@ -274,15 +276,28 @@ correctly skipped for the pull-request event.
 
 ## Separate optional work
 
-**J01 — Jev:** use legal cells as Choice options with explicit rules and board
-state. Read the current [TypeSafe contract](https://docs.typesafe.ai/primitives/choice)
-and SDK guidance before implementation. Benchmark tactics, quality and latency
-before making the agent selectable. Pin/log the provider model and prompt
-version, keep credentials server-side, set total call/retry budgets and a global
-spending ceiling, and isolate provider availability from local readiness.
-Record actual moves for replay; do not promise that a seed reproduces fresh
-provider answers. Cache only with keys that include rules, board, player and
-model/prompt version. Exhaustive pre-generation is unsuitable for larger boards.
+**J01 — Jev:** implementation details, operator commands and recovery are in
+[Jev operations](jev-operations.md). Local readiness excludes this optional
+service. There is no cache, hidden local fallback or automatic provider retry.
+The $1 UTC-month ledger includes a $0.25 evaluation sublimit; reservations are
+shared transactionally across processes and retained after uncertain calls.
+
+| Subtask | Status on 2026-09-20 | Dependency and completion condition |
+| --- | --- | --- |
+| G05.1 | local-complete | 5×5 policy, tactical/seed tests and production-sized benchmark passed; all three K profiles enabled locally. |
+| G05.2 | pending operator release | G05.1; normal CI/PR/production approval and public 3×3/5×5/9×9 smoke. Ship with Jev disabled first. |
+| J01.1 | local-complete | SDK adapter, capabilities, incremental series, cancellation, shared ledger, private evaluator and mocked/API/browser tests implemented. |
+| J01.2 | pending operator setup | J01.1; runtime-only key, same-host directory, versioned ledger, tariff confirmation, backup/restore and rolling-mount readback. Local process tests are not VPS acceptance. |
+| J01.3 | pending paid evaluation | J01.2; explicit approval, every variant's legality/tactics/latency and both sides against Random/Rules within the shared budget; retain private results. Weak play can remain experimental. |
+| J01.4 | pending operator activation | G05.2, J01.2, J01.3; enable optional agent, verify human/series paths, disabled/error behavior and retained ledger after recreation/rollback. |
+
+Local evidence: 198 Python 3.12 tests, 15 browser scenarios and image smoke
+passed. Cases include simultaneous queue bursts, missing/paused accounting,
+two-process budget contention, process crash, month rollover, backup/reconcile,
+upstream failures without retries, disconnect cancellation, and completed-game
+replay after stop/error. SDK tests mock HTTP; no paid calls or VPS mutations
+were made. The game's local policies remain stateless; enabling Jev introduces
+persistent accounting and therefore requires the separate J01.2 acceptance.
 
 **T01 — Larger learned policies:** choose separate models per variant or a
 spatial network trained on multiple sizes. Supply rule information and mask

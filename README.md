@@ -14,18 +14,26 @@ The original project was created on GitLab; this repository is its GitHub fork. 
 - Deep Q-Network (DQN)
 - Minimax imitation network
 - REINFORCE policy-gradient network
+- TypeSafe Jev (optional remote agent, experimental)
 
 The trained agents are pure policies: no hidden win/block heuristic is applied during inference. Neural networks are trained with PyTorch and deployed as compact ONNX models.
 
 ## Web application
 
-The interface supports Human vs AI, local Player vs Player, and AI vs AI series. The focused board sizes are 3×3, 5×5, and 9×9, with a configurable winning line from 3 marks through the board size. A newly selected size defaults to `min(size, 5)` marks in a row. AI matches include deterministic seeds, complete move replays, pause/resume, single-step playback, five speeds, and aggregate results. English/Polish language and light/dark theme preferences are stored in first-party cookies.
+The interface supports Human vs AI, local Player vs Player, and AI vs AI series. The focused board sizes are 3×3, 5×5, and 9×9, with a configurable winning line from 3 marks through the board size. A newly selected size defaults to `min(size, 5)` marks in a row. AI matches include seeds for local agents, complete move replays, pause/resume, single-step playback, five speeds, and aggregate results. Jev replays use recorded moves; seeds do not reproduce fresh provider responses. English/Polish language and light/dark theme preferences are stored in first-party cookies.
 
-Random and Rules support every board variant. Minimax, MCTS, Q-learning, DQN,
+Random and Rules support every board variant. MCTS supports 3×3 and 5×5
+(all three winning lengths); 9×9 MCTS remains disabled. Minimax, Q-learning, DQN,
 Imitation, and REINFORCE remain available for classic 3×3 only. The interface
 gets this compatibility matrix from `/api/agents` and disables unsupported
 choices; the API also rejects an incompatible pair before inference. Existing
 learned artifacts are unchanged and were not retrained for this feature.
+
+Jev supports every variant when configured, but is disabled by default. It uses
+one paid API call per non-forced move and a shared persistent monthly budget.
+See [Jev setup, cost control and recovery](docs/jev-operations.md) before enabling
+it. Larger-board and Jev series use one move request at a time; stopping or
+failing a series preserves completed games and does not score a partial game.
 
 ```bash
 git clone https://github.com/SzczepanGrela/tic-tac-toe-ai.git
@@ -70,7 +78,8 @@ See [benchmark results](docs/benchmark.md) for the promoted models.
 
 The [variable-board implementation record](docs/variable-board-plan.md) covers
 the rules, compatibility contract, safety limits, measurements, validation and
-deferred MCTS/model/provider work.
+MCTS/model/provider work. The [5×5 MCTS report](docs/mcts-5x5.md) records the
+selected simulation budget, latency and separate results against Random/Rules.
 
 ## Tests
 

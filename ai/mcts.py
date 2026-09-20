@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from game.state import GameState
+from ai.execution import check_search
 
 
 @dataclass
@@ -41,6 +42,7 @@ class MCTSAgent:
         root = MCTSNode(game_state.clone())
         root_player = game_state.current_player
         for _ in range(self.iterations):
+            check_search()
             node = self._select(root)
             result = self._simulate(node.game_state, root_player)
             self._backpropagate(node, result, root_player)
@@ -76,6 +78,7 @@ class MCTSAgent:
     def _simulate(self, game_state: GameState, root_player: int) -> float:
         state = game_state.clone()
         while not state.is_game_over():
+            check_search()
             state.make_move_assuming_active(*self._simulation_move(state))
         winner = state.get_winner()
         return 1.0 if winner == root_player else 0.0 if winner == -root_player else 0.5

@@ -11,6 +11,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TypeVar
 
+from ai.execution import SearchBudget, SearchStopped, check_search, current_budget
+from ai.jev import JevError, JevService
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field, StrictInt, model_validator
@@ -75,6 +77,7 @@ class MoveResponse(BaseModel):
     seed: int
     board_size: int
     win_length: int
+    metadata: dict[str, str | bool | None] | None = None
 
 
 class MatchRequest(RulesRequest):
@@ -195,13 +198,21 @@ class WorkGate:
     ) -> T:
         await self._acquire()
         release_on_exit = True
-        worker = asyncio.create_task(asyncio.to_thread(function, *args))
+        budget = SearchBudget(time.monotonic() + timeout_seconds)
+        def execute():
+            token = current_budget.set(budget)
+            try:
+                return function(*args)
+            finally:
+                current_budget.reset(token)
+        worker = asyncio.create_task(asyncio.to_thread(execute))
         try:
             return await asyncio.wait_for(
                 asyncio.shield(worker),
                 timeout=timeout_seconds,
             )
         except TimeoutError as exc:
+            budget.cancelled.set()
             release_on_exit = False
             worker.add_done_callback(self._release_after_worker)
             raise WorkTimedOut from exc
@@ -209,7 +220,13 @@ class WorkGate:
             # asyncio cannot stop a thread that has already started. Keep the
             # work slot occupied until it really exits, then propagate the
             # cancelled request.
-            await worker
+            budget.cancelled.set()
+            release_on_exit = False
+            worker.add_done_callback(self._release_after_worker)
+            try:
+                await asyncio.shield(worker)
+            except SearchStopped:
+                pass
             raise
         finally:
             if release_on_exit:
@@ -231,7 +248,11 @@ match_limiter = TokenBucket(capacity=30, refill_per_second=0.5)
 async def lifespan(app: FastAPI):
     app.state.registry = AgentRegistry(require_models=True)
     app.state.work_gate = WorkGate(AI_ACTIVE_LIMIT, AI_WAITING_LIMIT)
-    yield
+    app.state.jev = JevService.from_environment()
+    try:
+        yield
+    finally:
+        await app.state.jev.aclose()
 
 
 app = FastAPI(title="Tic-Tac-Toe AI Lab", version="2.1.0", lifespan=lifespan)
@@ -284,7 +305,7 @@ async def agent_capabilities(
         "board_size": rules.board_size,
         "win_length": rules.win_length,
         "revision": RELEASE_REVISION,
-        "agents": request.app.state.registry.capabilities(rules),
+        "agents": request.app.state.registry.capabilities(rules) + [await request.app.state.jev.capability()],
     }
 
 
@@ -321,8 +342,29 @@ async def _run_ai_work(
             detail="AI work queue is full",
             headers={"Retry-After": "1"},
         ) from exc
-    except WorkTimedOut as exc:
+    except (WorkTimedOut, SearchStopped) as exc:
         raise HTTPException(status_code=504, detail="AI computation timed out") from exc
+
+
+async def _while_connected(request: Request, operation):
+    """Abort computation/provider I/O when the client closes a parsed request."""
+    async def disconnected():
+        while True:
+            if (await request.receive())["type"] == "http.disconnect":
+                return
+
+    worker = asyncio.create_task(operation)
+    watcher = asyncio.create_task(disconnected())
+    try:
+        await asyncio.wait((worker, watcher), return_when=asyncio.FIRST_COMPLETED)
+        if worker.done():
+            return await worker
+        raise HTTPException(status_code=499, detail="Client disconnected")
+    finally:
+        watcher.cancel()
+        if not worker.done():
+            worker.cancel()
+        await asyncio.gather(worker, watcher, return_exceptions=True)
 
 
 @app.post("/api/move", response_model=MoveResponse)
@@ -341,19 +383,26 @@ async def calculate_move(payload: MoveRequest, request: Request) -> MoveResponse
     if state.is_game_over():
         raise HTTPException(status_code=409, detail="The game is already over")
     seed = payload.seed if payload.seed is not None else secrets.randbits(32)
-    move = await _run_ai_work(
-        request,
-        _select_move,
-        request.app.state.registry,
-        payload.algorithm,
-        state,
-        random.Random(seed),
-    )
+    if payload.algorithm is AgentId.jev:
+        try:
+            move, metadata = await _while_connected(request, request.app.state.jev.select_move(state))
+        except JevError as exc:
+            raise HTTPException(status_code=exc.status, detail={"code": exc.code},
+                                headers={"Retry-After": "2"} if exc.status == 429 else None) from exc
+    else:
+        move = await _while_connected(request, _run_ai_work(
+            request, _select_move, request.app.state.registry,
+            payload.algorithm, state, random.Random(seed)))
+        capability = next(c for c in request.app.state.registry.capabilities(state.rules)
+                          if c["id"] == payload.algorithm.value)
+        metadata = {key: capability[key] for key in ("policy_version", "work_profile", "seed_reproducible")}
+    metadata["server_revision"] = RELEASE_REVISION
     return MoveResponse(
         move=Move(row=move[0], column=move[1], player=state.current_player),
         seed=seed,
         board_size=state.board_size,
         win_length=state.win_length,
+        metadata=metadata,
     )
 
 
@@ -366,6 +415,7 @@ def _simulate_matches(payload: MatchRequest, registry: AgentRegistry, seed: int)
         state = GameState(rules=rules)
         moves = []
         while not state.is_game_over():
+            check_search()
             agent_id = payload.x_algorithm if state.current_player == 1 else payload.o_algorithm
             player = state.current_player
             move = _select_move(registry, agent_id, state, rng)
@@ -396,6 +446,8 @@ def _simulate_matches(payload: MatchRequest, registry: AgentRegistry, seed: int)
 @app.post("/api/matches", response_model=MatchResponse)
 async def calculate_matches(payload: MatchRequest, request: Request) -> MatchResponse:
     rules = payload.game_rules()
+    if AgentId.jev in (payload.x_algorithm, payload.o_algorithm):
+        raise HTTPException(status_code=422, detail="Jev series must use the incremental move endpoint")
     if rules != GameRules():
         raise HTTPException(
             status_code=422,
@@ -412,11 +464,11 @@ async def calculate_matches(payload: MatchRequest, request: Request) -> MatchRes
             headers={"Retry-After": str(retry_after)},
         )
     seed = payload.seed if payload.seed is not None else secrets.randbits(32)
-    return await _run_ai_work(
+    return await _while_connected(request, _run_ai_work(
         request,
         _simulate_matches,
         payload,
         request.app.state.registry,
         seed,
         timeout_seconds=AI_MATCH_TIMEOUT_SECONDS,
-    )
+    ))

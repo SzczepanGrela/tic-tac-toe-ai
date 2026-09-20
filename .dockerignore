@@ -10,3 +10,7 @@ tools
 docs
 README.md
 training
+benchmarks
+*.sqlite3
+*.sqlite3-journal
+jev-evaluation*.jsonl

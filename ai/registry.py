@@ -9,6 +9,7 @@ from typing import TypedDict
 from ai.agent_q_learning import QLearningAgent
 from ai.base import Agent
 from ai.mcts import find_best_move as find_mcts_move
+from ai import mcts_large
 from ai.minimax import find_best_move as find_minimax_move
 from ai.neural import OnnxPolicyAgent
 from ai.random_player import find_random_move
@@ -27,6 +28,10 @@ class AgentId(str, Enum):
     dqn = "dqn"
     imitation = "imitation"
     reinforce = "reinforce"
+    jev = "jev"
+
+
+LOCAL_AGENT_IDS = tuple(agent for agent in AgentId if agent is not AgentId.jev)
 
 
 class AgentCapability(TypedDict):
@@ -35,6 +40,8 @@ class AgentCapability(TypedDict):
     reason: str | None
     policy_version: str
     work_profile: str
+    series_mode: str
+    seed_reproducible: bool
 
 
 class FunctionAgent:
@@ -48,6 +55,8 @@ class FunctionAgent:
             return find_rules_move(state, rng)
         if self.agent_id is AgentId.minimax:
             return find_minimax_move(state, rng=rng)
+        if state.board_size == 5:
+            return mcts_large.find_best_move(state, rng)
         return find_mcts_move(state, iterations=1000, rng=rng)
 
 
@@ -103,23 +112,28 @@ class AgentRegistry:
 
     @classmethod
     def supports_rules(cls, agent_id: AgentId, rules: GameRules) -> bool:
-        return rules == GameRules() or agent_id in cls.ALL_VARIANT_AGENTS
+        return agent_id in LOCAL_AGENT_IDS and (rules == GameRules() or agent_id in cls.ALL_VARIANT_AGENTS or (
+            agent_id is AgentId.mcts and rules.board_size == 5
+        ))
 
     def capabilities(self, rules: GameRules) -> list[AgentCapability]:
         capabilities = []
-        for agent_id in AgentId:
+        for agent_id in LOCAL_AGENT_IDS:
             if agent_id not in self.agents:
                 reason = "unavailable"
             elif not self.supports_rules(agent_id, rules):
-                reason = "only_3x3"
+                reason = "unsupported_rules" if agent_id is AgentId.mcts else "only_3x3"
             else:
                 reason = None
             capabilities.append({
                 "id": agent_id.value,
                 "available": reason is None,
                 "reason": reason,
-                "policy_version": self.policy_versions[agent_id],
+                "policy_version": (mcts_large.POLICY_VERSION if agent_id is AgentId.mcts
+                                   and rules.board_size == 5 else self.policy_versions[agent_id]),
                 "work_profile": self._work_profile(agent_id, rules),
+                "series_mode": "batch" if rules == GameRules() else "incremental",
+                "seed_reproducible": True,
             })
         return capabilities
 
@@ -132,11 +146,12 @@ class AgentRegistry:
         if agent_id is AgentId.minimax:
             return "exact-3x3-search"
         if agent_id is AgentId.mcts:
-            return "1000-simulations"
+            return (f"{mcts_large.PROFILES[rules.win_length]}-simulations" if rules.board_size == 5
+                    else "classic-500-800-1000-simulations")
         return "promoted-3x3-artifact"
 
     def health(self) -> dict[str, str]:
         return {
             agent_id.value: "ready" if agent_id in self.agents else self.errors.get(agent_id, "unavailable")
-            for agent_id in AgentId
+            for agent_id in LOCAL_AGENT_IDS
         }

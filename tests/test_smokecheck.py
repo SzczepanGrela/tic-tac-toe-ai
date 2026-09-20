@@ -91,6 +91,7 @@ def test_smokecheck_validates_health_assets_and_real_move(monkeypatch) -> None:
         ("GET", "https://tictactoe.example/static/favicon.svg"),
         ("POST", "https://tictactoe.example/api/move"),
         ("POST", "https://tictactoe.example/api/move"),
+        ("POST", "https://tictactoe.example/api/move"),
     ]
 
 

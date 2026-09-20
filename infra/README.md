@@ -28,7 +28,10 @@ healthy before completing a rolling update and removing the previous container.
 [`coolify-production.json`](coolify-production.json) records the nonsecret fields
 that must match before a release may change production. The application is a
 Docker Image resource that exposes only container port `8080`, has no host port
-mapping and no persistent storage. Its `fqdn` supplies the public Traefik route;
+mapping. With Jev disabled, the game requires no persistent storage. Enabling
+Jev adds the shared spend ledger described in [Jev operations](../docs/jev-operations.md);
+the existing JSON contract does not validate mounts, their contents or secrets.
+Its `fqdn` supplies the public Traefik route;
 the newer `domains` field and custom labels remain empty. It uses these effective
 runtime settings:
 
@@ -43,10 +46,12 @@ runtime settings:
 
 The current Coolify version does not apply an application PID limit or
 `no-new-privileges` through the Docker Image resource's custom option parser.
-Those settings are not claimed by the contract. The application is stateless, so
-an automated rollback cannot conflict with a database migration. Reuse of this
-release procedure for a stateful service requires a separate migration and
-rollback design.
+Those settings are not claimed by the contract. The original game release is
+stateless. With Jev enabled, rolling replicas must share one durable ledger;
+rollback changes the image only and must never restore an older spend balance.
+Missing/incompatible accounting disables Jev while local readiness stays healthy.
+Mount, backup/restore and same-host replica acceptance are required before
+activation; they are not established by the original stateless release tests.
 
 Coolify stores a digest as a tag in the form `sha256-<64 hex characters>`. The
 release program accepts only the standard `sha256:<64 hex characters>` form and

@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from ai.encoding import canonicalize, encode_board, inverse_transform_move, transform_move
-from ai.registry import AgentId, AgentRegistry
+from ai.registry import AgentId, AgentRegistry, LOCAL_AGENT_IDS
 from ai.rules import find_best_move as find_rules_move
 from game.state import GameRules, GameState
 from training.dataset import reachable_states
@@ -32,7 +32,7 @@ def test_all_registered_agents_return_legal_moves():
     registry = AgentRegistry()
     rng = random.Random(42)
     states = reachable_states()[::23]
-    for agent_id in AgentId:
+    for agent_id in LOCAL_AGENT_IDS:
         agent = registry.get(agent_id)
         for state in states:
             assert agent.select_move(state, rng) in state.get_available_moves(), agent_id
@@ -40,7 +40,7 @@ def test_all_registered_agents_return_legal_moves():
 
 def test_registry_health_reports_every_agent_ready():
     health = AgentRegistry().health()
-    assert health == {agent.value: "ready" for agent in AgentId}
+    assert health == {agent.value: "ready" for agent in LOCAL_AGENT_IDS}
 
 
 def test_registry_reports_variant_capabilities():
@@ -58,7 +58,7 @@ def test_registry_reports_variant_capabilities():
     assert all(
         item["id"] == agent_id
         and not item["available"]
-        and item["reason"] == "only_3x3"
+        and item["reason"] == ("unsupported_rules" if agent_id == "mcts" else "only_3x3")
         for agent_id, item in larger.items()
         if agent_id not in {"random", "rules"}
     )
