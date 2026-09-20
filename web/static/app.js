@@ -1,4 +1,4 @@
-const AGENT_IDS = ['random', 'rules', 'minimax', 'mcts', 'q_learning', 'dqn', 'imitation', 'reinforce'];
+const AGENT_IDS = ['random', 'rules', 'minimax', 'mcts', 'q_learning', 'dqn', 'imitation', 'reinforce', 'jev'];
 const BOARD_SIZES = [3, 5, 9];
 const SUPPORTED_LANGUAGES = ['en', 'pl'];
 const SUPPORTED_THEMES = ['light', 'dark'];
@@ -91,7 +91,7 @@ function populateAgentSelectors() {
       const capability = capabilities.get(agentId);
       const option = new Option(agentName(agentId), agentId);
       option.disabled = capability ? !capability.available : true;
-      if (option.disabled) option.title = t('agentUnavailable');
+      if (option.disabled) option.title = t(`unavailable.${capability?.reason || 'unavailable'}`);
       select.add(option);
     }
     const selectedOption = [...select.options].find(option => option.value === selected && !option.disabled);
@@ -271,6 +271,9 @@ function updateSeriesMeta() {
     size: replay.data.board_size || 3,
     win: replay.data.win_length || 3,
   });
+  if (Object.values(replay.data.agent_profiles || {}).some(profile => profile.seed_reproducible === false)) {
+    $('#series-meta').textContent += ` · ${t('remoteSeedNote')}`;
+  }
 }
 
 function refreshDynamicContent() {
@@ -364,6 +367,17 @@ function isLegalReturnedMove(position, move, player) {
     && position[move.row][move.column] === 0;
 }
 
+function responseError(data) {
+  const error = new Error('move request failed');
+  error.code = typeof data?.detail === 'object' ? data.detail.code : null;
+  return error;
+}
+
+function providerErrorKey(error, fallback) {
+  const key = `jevError.${error.code}`;
+  return translations[key] ? key : fallback;
+}
+
 async function requestAiMove() {
   const revision = gameRevision;
   cancelActiveRequest();
@@ -383,7 +397,7 @@ async function requestAiMove() {
       render();
       return;
     }
-    if (!response.ok) throw new Error();
+    if (!response.ok) throw responseError(data);
     if (!isLegalReturnedMove(board, data.move, currentPlayer)) throw new Error('illegal move response');
     board[data.move.row][data.move.column] = data.move.player;
     currentPlayer *= -1;
@@ -393,7 +407,7 @@ async function requestAiMove() {
     if (error.name === 'AbortError' || revision !== gameRevision || mode !== 'human') return;
     busy = false;
     finished = true;
-    setStatus('moveError');
+    setStatus(providerErrorKey(error, 'moveError'));
   } finally {
     if (activeController === controller) activeController = null;
   }
@@ -451,6 +465,7 @@ function replayAgentProfiles() {
     return [agentId, {
       policy_version: capability.policy_version || 'unknown',
       work_profile: capability.work_profile || 'unknown',
+      seed_reproducible: capability.seed_reproducible !== false,
     }];
   }));
 }
@@ -500,8 +515,8 @@ async function incrementalMove(position, algorithm, seed, controller, revision) 
     const data = await response.json();
     if (revision !== gameRevision || mode !== 'ai') throw new DOMException('Aborted', 'AbortError');
     if (response.status !== 429) {
-      if (!response.ok) throw new Error('move request failed');
-      return data.move;
+      if (!response.ok) throw responseError(data);
+      return data;
     }
     const retryAfter = Math.max(1, Math.min(30, Number(response.headers.get('Retry-After')) || 1));
     setStatus('seriesRateLimited', {seconds: retryAfter});
@@ -522,17 +537,20 @@ async function calculateIncrementalSeries(count, seed, controller, revision) {
     games: [],
     summary: {x_wins: 0, o_wins: 0, draws: 0},
   };
+  seriesCalculation.data = data;
   for (let game = 0; game < count; game++) {
     const position = Array.from({length: activeRules.boardSize}, () => Array(activeRules.boardSize).fill(0));
     const moves = [];
+    data.interrupted_game = {game: game + 1, moves, board_size: activeRules.boardSize, win_length: activeRules.winLength};
     let player = 1;
     while (result(position).winner === null) {
       await waitForSeriesTurn(controller.signal);
       const algorithm = player === 1 ? data.x_algorithm : data.o_algorithm;
-      const move = await incrementalMove(position, algorithm, deriveSeed(seed, game, moves.length), controller, revision);
+      const response = await incrementalMove(position, algorithm, deriveSeed(seed, game, moves.length), controller, revision);
+      const move = response.move;
       if (!isLegalReturnedMove(position, move, player)) throw new Error('illegal move response');
       position[move.row][move.column] = player;
-      moves.push({row: move.row, column: move.column, player});
+      moves.push({row: move.row, column: move.column, player, metadata: response.metadata || null});
       player *= -1;
       if (seriesCalculation?.paused) setStatus('seriesPaused');
       else setStatus('moveProgress', {current: game + 1, total: count, move: moves.length});
@@ -548,8 +566,23 @@ async function calculateIncrementalSeries(count, seed, controller, revision) {
       board_size: activeRules.boardSize,
       win_length: activeRules.winLength,
     });
+    delete data.interrupted_game;
   }
   return data;
+}
+
+function showSeries(data, playing) {
+  if (!data?.games.length) return;
+  replay = {data, game: 0, move: 0, playing};
+  $('#x-wins').textContent = data.summary.x_wins;
+  $('#o-wins').textContent = data.summary.o_wins;
+  $('#draws').textContent = data.summary.draws;
+  updateSeriesMeta();
+  $('#scoreboard').classList.remove('hidden');
+  $('#replay-controls').classList.remove('hidden', 'calculating');
+  $('#pause').textContent = t(playing ? 'pause' : 'replay');
+  loadReplayGame();
+  if (playing) scheduleReplay();
 }
 
 async function newAiSeries() {
@@ -566,7 +599,9 @@ async function newAiSeries() {
     const count = Number($('#series-count').value);
     const seed = seriesSeed();
     let data;
-    if (activeRules.boardSize === 3 && activeRules.winLength === 3) {
+    const agents = [$('#x-agent').value, $('#o-agent').value];
+    if (activeRules.boardSize === 3 && activeRules.winLength === 3
+        && agents.every(id => capabilities.get(id)?.series_mode !== 'incremental')) {
       const response = await fetch('/api/matches', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -593,33 +628,31 @@ async function newAiSeries() {
       $('#replay-controls').classList.add('calculating');
       $('#replay-controls').classList.remove('hidden');
       $('#pause').textContent = t('pause');
+      $('#stop-series').classList.remove('hidden');
       data = await calculateIncrementalSeries(count, seed, controller, revision);
     }
     if (revision !== gameRevision || mode !== 'ai') return;
-    replay = {data, game: 0, move: 0, playing: true};
     seriesCalculation = null;
     busy = false;
-    $('#x-wins').textContent = data.summary.x_wins;
-    $('#o-wins').textContent = data.summary.o_wins;
-    $('#draws').textContent = data.summary.draws;
-    updateSeriesMeta();
-    $('#scoreboard').classList.remove('hidden');
-    $('#replay-controls').classList.remove('hidden');
-    $('#replay-controls').classList.remove('calculating');
-    $('#pause').textContent = t('pause');
-    loadReplayGame();
-    scheduleReplay();
+    showSeries(data, true);
   } catch (error) {
-    if (error.name === 'AbortError' || revision !== gameRevision || mode !== 'ai') return;
+    if (revision !== gameRevision || mode !== 'ai') return;
+    const stopped = seriesCalculation?.stopRequested;
+    if (error.name === 'AbortError' && !stopped) return;
+    const partial = seriesCalculation?.data;
     busy = false;
     finished = true;
     seriesCalculation = null;
     $('#replay-controls').classList.add('hidden');
     $('#replay-controls').classList.remove('calculating');
-    setStatus('seriesError');
+    showSeries(partial, false);
+    setStatus(stopped ? 'seriesStopped' : providerErrorKey(error, 'seriesError'));
     render();
   } finally {
-    if (activeController === controller) activeController = null;
+    if (activeController === controller) {
+      activeController = null;
+      $('#stop-series').classList.add('hidden');
+    }
   }
 }
 
@@ -674,6 +707,7 @@ function stopReplay() {
   $('#replay-controls').classList.add('hidden');
   $('#replay-controls').classList.remove('calculating');
   $('#scoreboard').classList.add('hidden');
+  $('#stop-series').classList.add('hidden');
 }
 
 function toggleReplay() {
@@ -766,6 +800,11 @@ async function initialize() {
   $('#win-length').onchange = () => rulesChanged(false);
   $('#start').onclick = start;
   $('#pause').onclick = toggleReplay;
+  $('#stop-series').onclick = () => {
+    if (!seriesCalculation) return;
+    seriesCalculation.stopRequested = true;
+    activeController?.abort();
+  };
   $('#step').onclick = () => {
     if (seriesCalculation) {
       seriesCalculation.paused = true;

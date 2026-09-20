@@ -1,0 +1,222 @@
+import asyncio
+import json
+from types import SimpleNamespace
+
+import httpx2
+import pytest
+from typesafe_sdk import AsyncTypeSafeClient, RetryPolicy
+
+from ai.jev import JevError, JevService
+from game.state import GameRules, GameState
+from web.jev_budget import BudgetLedger, MODEL, RESERVATION, MONTHLY_LIMIT, LedgerUnavailable
+
+
+@pytest.fixture
+def ledger(tmp_path):
+    result = BudgetLedger.initialize(tmp_path / "usage.sqlite3")
+    result.reconcile(0)
+    return result
+
+
+def response_for(payload, **overrides):
+    choices = payload["questions"]["move"]["criteria"]
+    selected = next(iter(choices))
+    data = {"model": MODEL, "usage": {"input_tokens": 100, "output_tokens": 10},
+            "answers": {"move": {"type": "choice", "choice": selected, "confidence": .1,
+                                  "probabilities": {key: float(key == selected) for key in choices}}}}
+    data.update(overrides)
+    return data
+
+
+def client_with_handler(handler):
+    return AsyncTypeSafeClient(api_key="test-only-not-a-real-key", model=MODEL,
+                               retry=RetryPolicy(max_retries=0), transport=httpx2.MockTransport(handler))
+
+
+@pytest.mark.parametrize("size,length", [(n, k) for n in (3, 5, 9) for k in range(3, n + 1)])
+def test_real_sdk_contract_and_accounting_for_every_variant(ledger, size, length):
+    requests = []
+    def handler(request):
+        payload = json.loads(request.content)
+        requests.append(payload)
+        assert payload["model"] == MODEL
+        assert len(payload["questions"]["move"]["criteria"]) == size * size
+        return httpx2.Response(200, json=response_for(payload))
+    async def exercise():
+        service = JevService(client_with_handler(handler), ledger)
+        try:
+            move, metadata = await service.select_move(GameState(rules=GameRules(size, length)))
+            assert move == (0, 0)
+            assert metadata["model"] == MODEL
+            assert not metadata["seed_reproducible"]
+            assert ledger.status()["used_nano_usd"] == 4200
+        finally:
+            await service.aclose()
+    asyncio.run(exercise())
+    assert len(requests) == 1
+
+
+@pytest.mark.parametrize("status", [401, 429, 529, 500])
+def test_upstream_failures_do_not_retry_or_leak_and_keep_reservation(ledger, status):
+    attempts = []
+    def handler(request):
+        attempts.append(request)
+        return httpx2.Response(status, json={"error": "SECRET-UPSTREAM-TEXT"}, headers={"Retry-After": "1"})
+    async def exercise():
+        service = JevService(client_with_handler(handler), ledger)
+        try:
+            with pytest.raises(JevError) as exc:
+                await service.select_move(GameState())
+            assert exc.value.status == 503
+            assert str(exc.value) == "provider_unavailable"
+            assert ledger.status()["used_nano_usd"] == RESERVATION
+        finally:
+            await service.aclose()
+    asyncio.run(exercise())
+    assert len(attempts) == 1
+
+
+def test_invalid_move_is_not_replaced_by_another_agent(ledger):
+    def handler(request):
+        data = response_for(json.loads(request.content))
+        data["answers"]["move"]["choice"] = "r99c99"
+        return httpx2.Response(200, json=data)
+    async def exercise():
+        service = JevService(client_with_handler(handler), ledger)
+        try:
+            with pytest.raises(JevError, match="provider_response_invalid"):
+                await service.select_move(GameState())
+            assert ledger.status()["used_nano_usd"] == 4200
+        finally:
+            await service.aclose()
+    asyncio.run(exercise())
+
+
+def test_unknown_usage_keeps_maximum_charge(ledger):
+    def handler(request):
+        return httpx2.Response(200, json=response_for(json.loads(request.content), usage={}))
+    async def exercise():
+        service = JevService(client_with_handler(handler), ledger)
+        try:
+            await service.select_move(GameState())
+            assert ledger.status()["used_nano_usd"] == RESERVATION
+        finally:
+            await service.aclose()
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+def test_timeout_and_cancellation_retain_reservation(ledger, cancel):
+    async def exercise():
+        entered = asyncio.Event()
+        async def handler(request):
+            entered.set()
+            await asyncio.sleep(60)
+        service = JevService(client_with_handler(handler), ledger, timeout=.05)
+        try:
+            task = asyncio.create_task(service.select_move(GameState()))
+            await entered.wait()
+            if cancel:
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+            else:
+                with pytest.raises(JevError) as exc:
+                    await task
+                assert exc.value.status == 504
+            assert ledger.status()["used_nano_usd"] == RESERVATION
+            async with service.slot():
+                pass
+        finally:
+            await service.aclose()
+    asyncio.run(exercise())
+
+
+def test_budget_exhaustion_prevents_any_provider_call(ledger):
+    ledger.reconcile(MONTHLY_LIMIT)
+    async def exercise():
+        def handler(request):
+            pytest.fail("Provider must not be contacted")
+        service = JevService(client_with_handler(handler), ledger)
+        try:
+            assert (await service.capability())["reason"] == "budget_exhausted"
+            with pytest.raises(JevError, match="budget_exhausted"):
+                await service.select_move(GameState())
+        finally:
+            await service.aclose()
+    asyncio.run(exercise())
+
+
+def test_single_legal_move_does_not_call_provider(ledger):
+    async def exercise():
+        def handler(request):
+            pytest.fail("No call for a forced move")
+        service = JevService(client_with_handler(handler), ledger)
+        try:
+            state = GameState.from_board([[1, -1, 1], [1, -1, -1], [-1, 1, 0]])
+            move, meta = await service.select_move(state)
+            assert move == (2, 2)
+            assert meta["model"] is None
+            assert ledger.status()["used_nano_usd"] == 0
+        finally:
+            await service.aclose()
+    asyncio.run(exercise())
+
+
+def test_queue_is_bounded_and_has_a_deadline():
+    async def exercise():
+        service = JevService(queue_timeout=.05)
+        async with service.slot(), service.slot():
+            tasks = [asyncio.create_task(service.slot().__aenter__()) for _ in range(4)]
+            await asyncio.sleep(.01)
+            with pytest.raises(JevError, match="queue_full"):
+                async with service.slot():
+                    pass
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            assert all(isinstance(result, JevError) and result.status == 429 for result in results)
+        assert service._waiting == 0
+    asyncio.run(exercise())
+
+
+def test_simultaneous_burst_cannot_bypass_queue_limit():
+    async def exercise():
+        service = JevService(queue_timeout=.05)
+        release = asyncio.Event()
+        active = []
+        async def work():
+            async with service.slot():
+                active.append(True)
+                await release.wait()
+        tasks = [asyncio.create_task(work()) for _ in range(20)]
+        await asyncio.sleep(.01)
+        assert len(active) == 2
+        assert service._waiting == 4
+        assert sum(task.done() for task in tasks) == 14
+        release.set()
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        assert sum(isinstance(value, JevError) for value in results) == 14
+        assert len(active) == 6
+    asyncio.run(exercise())
+
+
+def test_evaluator_uses_evaluation_budget_and_does_not_score_partial_games():
+    from web.jev_evaluate import evaluate, tactical_positions
+    for size in (3, 5, 9):
+        for length in range(3, size + 1):
+            for _, state, expected in tactical_positions(size, length):
+                assert not state.is_game_over()
+                assert expected in state.get_available_moves()
+                GameState.from_board(state.board, state.rules)
+    records = []
+    class Service:
+        calls = 0
+        async def select_move(self, state, *, kind):
+            assert kind == "evaluation"
+            self.calls += 1
+            if self.calls == 5:
+                raise JevError("budget_exhausted")
+            return state.get_available_moves()[0], {}
+    with pytest.raises(JevError, match="budget_exhausted"):
+        asyncio.run(evaluate(Service(), records.append, games=1, variants=[(3, 3)]))
+    assert records[-1]["type"] == "interrupted_game"
+    assert not any(record["type"] == "game" for record in records)

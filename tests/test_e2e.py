@@ -53,7 +53,7 @@ def test_larger_board_disables_classic_only_agents(page, live_server_url):
     expect(page.locator("#human-agent option[value=random]")).not_to_have_attribute("disabled", "")
     expect(page.locator("#human-agent option[value=rules]")).not_to_have_attribute("disabled", "")
     expect(page.locator("#human-agent")).to_have_value("random")
-    expect(page.locator("#algorithm-note")).to_contain_text("Available for these rules: Random, Rules.")
+    expect(page.locator("#algorithm-note")).to_contain_text("Available for these rules: Random, Rules, MCTS.")
 
 
 def test_previous_ai_response_cannot_change_a_reset_board(page, live_server_url):
@@ -242,3 +242,61 @@ def test_invalid_preferences_fall_back_to_defaults(page, live_server_url):
     page.goto(live_server_url)
     expect(page.locator("html")).to_have_attribute("lang", "en")
     expect(page.locator("html")).to_have_attribute("data-theme", "light")
+
+
+@pytest.mark.parametrize("ending", ["complete", "failure", "stop"])
+def test_jev_classic_series_is_incremental_and_preserves_completed_games(page, live_server_url, ending):
+    def capabilities(route):
+        response = route.fetch()
+        payload = response.json()
+        jev = next(agent for agent in payload["agents"] if agent["id"] == "jev")
+        jev.update(available=True, reason=None)
+        route.fulfill(response=response, json=payload)
+
+    page.route("**/api/agents?*", capabilities)
+    page.add_init_script("""
+        Math.random = () => 0;
+        window.moveRequests = 0;
+        window.batchRequests = 0;
+        const nativeFetch = window.fetch.bind(window);
+        window.fetch = async (url, options) => {
+            if (url === '/api/matches') window.batchRequests++;
+            if (url !== '/api/move') return nativeFetch(url, options);
+            window.moveRequests++;
+            if (window.moveRequests > 7 && window.seriesEnding === 'failure') {
+                return new Response(JSON.stringify({detail: {code: 'budget_exhausted'}}), {status: 503});
+            }
+            if (window.moveRequests > 7 && window.seriesEnding === 'stop') {
+                return new Promise((resolve, reject) => options.signal.addEventListener(
+                    'abort', () => reject(new DOMException('Aborted', 'AbortError')), {once: true}));
+            }
+            const board = JSON.parse(options.body).board.flat();
+            const index = board.findIndex(value => value === 0);
+            return new Response(JSON.stringify({move: {
+                row: Math.floor(index / 3), column: index % 3,
+                player: board.filter(Boolean).length % 2 === 0 ? 1 : -1,
+            }, metadata: {seed_reproducible: false, model: 'jev-1.13.0'}}), {status: 200});
+        };
+    """)
+    page.goto(live_server_url)
+    page.evaluate("ending => window.seriesEnding = ending", ending)
+    page.get_by_role("button", name="AI vs AI").click()
+    page.locator("#x-agent").select_option("jev")
+    page.locator("#o-agent").select_option("jev")
+    page.locator("#series-count").select_option("3")
+    page.get_by_role("button", name="Run series").click()
+    if ending == "stop":
+        page.wait_for_function("window.moveRequests === 8")
+        page.locator("#stop-series").click()
+    expect(page.locator("#scoreboard")).to_be_visible()
+    assert page.evaluate("window.batchRequests") == 0
+    expect(page.locator("#x-wins")).to_have_text("3" if ending == "complete" else "1")
+    expect(page.locator("#o-wins")).to_have_text("0")
+    expect(page.locator("#draws")).to_have_text("0")
+    assert page.evaluate("replay.data.games[0].moves[0].metadata.model") == "jev-1.13.0"
+    if ending != "complete":
+        assert page.evaluate("replay.data.games.length") == 1
+        assert page.evaluate("replay.data.interrupted_game.game") == 2
+        expect(page.locator("#stop-series")).to_be_hidden()
+        page.get_by_role("button", name="Step", exact=True).click()
+        expect(page.locator(".cell.x")).to_have_count(1)

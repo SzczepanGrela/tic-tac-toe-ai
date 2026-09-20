@@ -124,13 +124,14 @@ def check_release(
         for item in agent_capabilities
         if isinstance(item, Mapping) and item.get("available") is True
     }
-    if available != {"random", "rules"}:
+    if not {"random", "rules"} <= available or available - {"random", "rules", "jev"}:
         raise ValueError("larger-board agent capabilities are incorrect")
 
     _check_assets(base_url, timeout=timeout)
 
     variants = (
         (3, 3, {"algorithm": "rules", "seed": 1}),
+        (5, 5, {"algorithm": "mcts", "seed": 1, "board_size": 5, "win_length": 5}),
         (
             9,
             5,

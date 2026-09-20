@@ -29,7 +29,7 @@ def test_agent_capabilities_are_scoped_to_rules():
     classic = request("GET", "/api/agents").json()
     assert classic["board_size"] == classic["win_length"] == 3
     assert classic["revision"] == web_app.RELEASE_REVISION
-    assert all(agent["available"] for agent in classic["agents"])
+    assert all(agent["available"] for agent in classic["agents"] if agent["id"] != "jev")
     assert all(agent["policy_version"] for agent in classic["agents"])
     assert all(agent["work_profile"] for agent in classic["agents"])
 
@@ -38,6 +38,62 @@ def test_agent_capabilities_are_scoped_to_rules():
     assert available == {"random", "rules"}
     assert request("GET", "/api/agents?board_size=4&win_length=3").status_code == 422
     assert request("GET", "/api/agents?board_size=11&win_length=5").status_code == 422
+
+
+@pytest.mark.parametrize("length", [3, 4, 5])
+def test_mcts_five_by_five_metadata_and_seed(length, monkeypatch):
+    monkeypatch.setattr(web_app, "move_limiter", TokenBucket(100, 100))
+    payload = {"board": [[0] * 5 for _ in range(5)], "board_size": 5,
+               "win_length": length, "algorithm": "mcts", "seed": 42}
+    first = request("POST", "/api/move", json=payload)
+    assert first.status_code == 200
+    assert first.json() == request("POST", "/api/move", json=payload).json()
+    assert first.json()["metadata"] == {
+        "policy_version": "mcts-5x5-v1", "work_profile": "256-simulations",
+        "seed_reproducible": True, "server_revision": web_app.RELEASE_REVISION}
+
+
+def test_jev_is_optional_and_cannot_use_batch_endpoint(monkeypatch):
+    monkeypatch.setenv("JEV_ENABLED", "false")
+    capability = next(a for a in request("GET", "/api/agents").json()["agents"] if a["id"] == "jev")
+    assert not capability["available"]
+    assert capability["reason"] == "disabled"
+    assert capability["series_mode"] == "incremental"
+    response = request("POST", "/api/move", json={"board": [[0] * 3 for _ in range(3)], "algorithm": "jev"})
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "disabled"
+    assert request("POST", "/api/matches", json={"x_algorithm": "jev", "o_algorithm": "random"}).status_code == 422
+    monkeypatch.setenv("JEV_ENABLED", "true")
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    assert request("GET", "/api/health").status_code == 200
+    assert all(value == "ready" for value in request("GET", "/api/health").json()["agents"].values())
+
+
+def test_disconnect_cancels_search_and_releases_slot_after_worker_stops():
+    import threading
+    from ai.execution import check_search
+    async def exercise():
+        gate = WorkGate(1, 1)
+        started = threading.Event()
+        finished = threading.Event()
+        def search():
+            started.set()
+            try:
+                while True:
+                    check_search()
+                    time.sleep(.001)
+            finally:
+                finished.set()
+        async def receive():
+            while not started.is_set():
+                await asyncio.sleep(.001)
+            return {"type": "http.disconnect"}
+        with pytest.raises(web_app.HTTPException) as exc:
+            await web_app._while_connected(SimpleNamespace(receive=receive), gate.run(search, timeout_seconds=5))
+        assert exc.value.status_code == 499
+        assert finished.is_set()
+        assert await gate.run(lambda: "free", timeout_seconds=1) == "free"
+    asyncio.run(exercise())
 
 
 def test_favicon_is_served():
