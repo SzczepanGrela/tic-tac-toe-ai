@@ -10,7 +10,7 @@ readonly BACKUP_DIR="${BACKUP_DIR:-/var/backups/tictactoe-jev}"
 readonly RCLONE_CONFIG="${RCLONE_CONFIG:-/etc/rclone/tictactoe-jev.conf}"
 readonly RCLONE_REMOTE="${RCLONE_REMOTE:?RCLONE_REMOTE is required}"
 readonly LOCAL_COPIES="${LOCAL_COPIES:-14}"
-readonly REMOTE_RETENTION_DAYS="${REMOTE_RETENTION_DAYS:-90}"
+readonly REMOTE_RETENTION_DAYS="${REMOTE_RETENTION_DAYS:-30}"
 readonly LOCK_FILE="${LOCK_FILE:-/run/lock/tictactoe-jev-backup.lock}"
 
 container=""
@@ -41,6 +41,16 @@ trap cleanup EXIT
 [[ "${LOCAL_COPIES}" =~ ^[1-9][0-9]*$ ]] || fail "invalid local retention"
 [[ "${REMOTE_RETENTION_DAYS}" =~ ^[1-9][0-9]*$ ]] \
     || fail "invalid remote retention"
+
+command -v rclone >/dev/null 2>&1 || fail "rclone is not installed"
+readonly rclone_version="$(
+    rclone version | awk 'NR == 1 { sub(/^rclone v/, ""); sub(/-.*/, ""); print }'
+)"
+[[ "${rclone_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+    || fail "could not determine rclone version"
+IFS=. read -r rclone_major rclone_minor _ <<<"${rclone_version}"
+((rclone_major > 1 || (rclone_major == 1 && rclone_minor >= 61))) \
+    || fail "rclone 1.61 or newer is required for R2 uploads without ACL headers"
 
 exec 9>"${LOCK_FILE}"
 flock -n 9 || fail "another backup is already running"
@@ -117,14 +127,15 @@ rmdir -- "${workdir}"
 workdir=""
 
 readonly local_sha="$(sha256sum "${final_path}" | awk '{print $1}')"
-rclone copyto --config "${RCLONE_CONFIG}" --checksum \
+rclone copyto --config "${RCLONE_CONFIG}" --s3-no-check-bucket --checksum \
     "${final_path}" "${remote_path}"
 readonly remote_sha="$(
-    rclone cat --config "${RCLONE_CONFIG}" "${remote_path}" | sha256sum | awk '{print $1}'
+    rclone cat --config "${RCLONE_CONFIG}" --s3-no-check-bucket \
+        "${remote_path}" | sha256sum | awk '{print $1}'
 )"
 [[ "${remote_sha}" == "${local_sha}" ]] || fail "remote checksum mismatch"
 
-rclone delete --config "${RCLONE_CONFIG}" \
+rclone delete --config "${RCLONE_CONFIG}" --s3-no-check-bucket \
     --min-age "${REMOTE_RETENTION_DAYS}d" \
     --include 'usage-*.sqlite3' "${RCLONE_REMOTE%/}"
 
