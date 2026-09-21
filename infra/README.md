@@ -145,3 +145,13 @@ The older `deploy.sh` and forced-command launcher remain available only as a
 reviewed emergency fallback during this transition. The current workflow does not
 use SSH or Nginx Proxy Manager. Remove the legacy scripts, their deployment key,
 and their tests after the Coolify path has completed the activation sequence.
+
+## Jev ledger backup
+
+[`tictactoe-jev-backup`](tictactoe-jev-backup) and the units in
+[`systemd`](systemd) implement the production ledger backup described in
+[Jev operations](../docs/jev-operations.md). They contain no credentials. Install
+the script as `/usr/local/libexec/grela-infra/tictactoe-jev-backup`, install the
+units under `/etc/systemd/system`, and keep the bucket-scoped R2 credentials in
+the root-only `/etc/rclone/tictactoe-jev.conf`. Do not enable the timer until a
+manual run and restore drill have succeeded.
