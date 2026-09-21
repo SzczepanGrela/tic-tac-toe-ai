@@ -150,7 +150,7 @@ creates the copy through `web.jev_admin`, and checks SQLite integrity, schema,
 tariff and the copy's paused flag. It then uploads to the dedicated
 `grela-tictactoe-jev-backups` R2 bucket and downloads the small object again to
 compare its SHA-256 digest. It keeps 14 local copies and deletes R2 ledger
-objects older than 90 days. A failed upload or validation leaves the local copy
+objects older than 30 days. A failed upload or validation leaves the local copy
 and fails the unit; it must be monitored rather than treated as success.
 
 The rclone configuration lives only at `/etc/rclone/tictactoe-jev.conf`, owned
@@ -162,7 +162,7 @@ copies are mode 0600. Installation is incomplete until one manual unit run,
 remote checksum verification, timer inspection and a restore drill have passed.
 
 Create the private bucket and its bucket-scoped key before configuring the host.
-Add a bucket lifecycle rule with no prefix that deletes objects after 90 days;
+Add a bucket lifecycle rule with no prefix that deletes objects after 30 days;
 this enforces remote retention even if the VPS job stops running. The script's
 own remote deletion is an independent second enforcement path.
 The root-only rclone file has this shape (replace the three placeholders locally;
@@ -176,14 +176,24 @@ access_key_id = <R2_ACCESS_KEY_ID>
 secret_access_key = <R2_SECRET_ACCESS_KEY>
 region = auto
 endpoint = https://<CLOUDFLARE_ACCOUNT_ID>.r2.cloudflarestorage.com
-acl = private
+no_check_bucket = true
 ```
 
 Use the jurisdiction-specific endpoint instead when the bucket has an explicit
-R2 jurisdiction. Install `rclone`, the versioned script and both units, then run
+R2 jurisdiction. Do not set `acl` or `bucket_acl`: R2 rejects the corresponding
+S3 ACL headers. Use rclone 1.61 or newer; older releases send a private ACL even
+when the setting is absent. `no_check_bucket` prevents rclone from attempting
+`CreateBucket`, which a bucket-scoped object key intentionally cannot perform.
+Install `rclone`, the versioned script and both units, then run
 the service manually. Inspect `systemctl status`, the root-only local file and
 `rclone lsl tictactoe-jev-r2:grela-tictactoe-jev-backups` without printing the
 configuration. Enable the timer only after the restore drill described below.
+
+This compatibility requirement was confirmed on 2026-09-21. Debian's rclone
+1.60.1 first failed with R2's unsupported ACL behavior. After updating, an
+object-scoped key exposed the second error as a denied `CreateBucket` request.
+rclone 1.75.1 plus `no_check_bucket` completed the upload, remote readback and
+SHA-256 comparison without granting bucket-creation permission.
 
 For restore, first disable/pause Jev in every replica and allow outstanding calls
 to finish. Preserve the current ledger; restore the paused copy with correct
@@ -206,4 +216,7 @@ restore an older balance as part of an application rollback.
 - [Python SDK](https://docs.typesafe.ai/sdk/python/usage)
 - [SQLite online backup](https://www.sqlite.org/backup.html)
 - [Cloudflare R2 authentication](https://developers.cloudflare.com/r2/api/tokens/)
+- [Cloudflare R2 S3 compatibility](https://developers.cloudflare.com/r2/api/s3/api/)
 - [rclone Cloudflare R2 configuration](https://rclone.org/s3/#cloudflare-r2)
+- [rclone `no_check_bucket`](https://rclone.org/s3/#s3-no-check-bucket)
+- [rclone release signing](https://rclone.org/release_signing/)
