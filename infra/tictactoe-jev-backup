@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+umask 077
+
+readonly APP_UUID="${APP_UUID:-cp5ye4pzfmj8ibrhzwima0si}"
+readonly DATA_DIR="${DATA_DIR:-/var/lib/tictactoe/jev}"
+readonly CONTAINER_DATA_DIR="/var/lib/tictactoe/jev"
+readonly BACKUP_DIR="${BACKUP_DIR:-/var/backups/tictactoe-jev}"
+readonly RCLONE_CONFIG="${RCLONE_CONFIG:-/etc/rclone/tictactoe-jev.conf}"
+readonly RCLONE_REMOTE="${RCLONE_REMOTE:?RCLONE_REMOTE is required}"
+readonly LOCAL_COPIES="${LOCAL_COPIES:-14}"
+readonly REMOTE_RETENTION_DAYS="${REMOTE_RETENTION_DAYS:-90}"
+readonly LOCK_FILE="${LOCK_FILE:-/run/lock/tictactoe-jev-backup.lock}"
+
+container=""
+container_copy=""
+workdir=""
+
+fail() {
+    echo "Jev backup error: $*" >&2
+    exit 1
+}
+
+cleanup() {
+    local status=$?
+    set +e
+    if [[ -n "${container}" && -n "${container_copy}" ]]; then
+        docker exec "${container}" rm -f -- "${container_copy}" >/dev/null 2>&1
+    fi
+    if [[ -n "${workdir}" ]]; then
+        rm -rf -- "${workdir}"
+    fi
+    exit "${status}"
+}
+trap cleanup EXIT
+
+[[ "${APP_UUID}" =~ ^[a-z0-9]{20,32}$ ]] || fail "invalid application UUID"
+[[ "${RCLONE_REMOTE}" =~ ^[A-Za-z0-9._-]+:[A-Za-z0-9._/-]+$ ]] \
+    || fail "invalid rclone destination"
+[[ "${LOCAL_COPIES}" =~ ^[1-9][0-9]*$ ]] || fail "invalid local retention"
+[[ "${REMOTE_RETENTION_DAYS}" =~ ^[1-9][0-9]*$ ]] \
+    || fail "invalid remote retention"
+
+exec 9>"${LOCK_FILE}"
+flock -n 9 || fail "another backup is already running"
+
+[[ "$(stat -c '%u:%g:%a' "${DATA_DIR}")" == "10001:10001:700" ]] \
+    || fail "unexpected data-directory ownership or mode"
+[[ "$(stat -c '%u:%g:%a' "${BACKUP_DIR}")" == "0:0:700" ]] \
+    || fail "unexpected backup-directory ownership or mode"
+[[ "$(stat -c '%u:%g:%a' "${DATA_DIR}/usage.sqlite3")" == "10001:10001:600" ]] \
+    || fail "unexpected ledger ownership or mode"
+[[ "$(stat -Lc '%u:%g:%a' "${RCLONE_CONFIG}")" == "0:0:600" ]] \
+    || fail "unexpected rclone-config ownership or mode"
+
+mapfile -t application_containers < <(
+    docker ps --filter "name=${APP_UUID}" --format '{{.ID}}'
+)
+((${#application_containers[@]} > 0)) || fail "no running application container"
+
+for candidate in "${application_containers[@]}"; do
+    name="$(docker inspect --format '{{.Name}}' "${candidate}")"
+    [[ "${name}" == "/${APP_UUID}-"* ]] || continue
+
+    source="$(docker inspect --format \
+        '{{range .Mounts}}{{if eq .Destination "/var/lib/tictactoe/jev"}}{{.Source}}{{end}}{{end}}' \
+        "${candidate}")"
+    [[ "${source}" == "${DATA_DIR}" ]] \
+        || fail "container ${name} does not use the approved ledger mount"
+
+    health="$(docker inspect --format \
+        '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' \
+        "${candidate}")"
+    if [[ -z "${container}" && "${health}" == "healthy" ]]; then
+        container="${candidate}"
+    fi
+done
+[[ -n "${container}" ]] || fail "no healthy application container"
+
+readonly timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+readonly filename="usage-${timestamp}.sqlite3"
+readonly final_path="${BACKUP_DIR}/${filename}"
+readonly remote_path="${RCLONE_REMOTE%/}/${filename}"
+container_copy="${CONTAINER_DATA_DIR}/.${filename}.partial"
+[[ ! -e "${final_path}" ]] || fail "backup filename already exists"
+
+workdir="$(mktemp -d "${BACKUP_DIR}/.backup.XXXXXX")"
+readonly local_copy="${workdir}/${filename}"
+
+docker exec "${container}" python -m web.jev_admin backup "${container_copy}"
+docker cp "${container}:${container_copy}" "${local_copy}" >/dev/null
+docker exec "${container}" rm -f -- "${container_copy}"
+container_copy=""
+
+chown root:root "${local_copy}"
+chmod 0600 "${local_copy}"
+
+python3 - "${local_copy}" <<'PY'
+import sqlite3
+import sys
+
+with sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True) as database:
+    if database.execute("PRAGMA quick_check").fetchone() != ("ok",):
+        raise SystemExit("backup quick_check failed")
+    if database.execute("PRAGMA user_version").fetchone() != (1,):
+        raise SystemExit("backup schema version is invalid")
+    policy = database.execute(
+        "SELECT model,price,limit_nano,paused FROM policy WHERE id=1"
+    ).fetchone()
+    if policy != ("jev-1.13.0", 42, 1_000_000_000, 1):
+        raise SystemExit("backup policy or paused state is invalid")
+PY
+
+mv -- "${local_copy}" "${final_path}"
+rmdir -- "${workdir}"
+workdir=""
+
+readonly local_sha="$(sha256sum "${final_path}" | awk '{print $1}')"
+rclone copyto --config "${RCLONE_CONFIG}" --checksum \
+    "${final_path}" "${remote_path}"
+readonly remote_sha="$(
+    rclone cat --config "${RCLONE_CONFIG}" "${remote_path}" | sha256sum | awk '{print $1}'
+)"
+[[ "${remote_sha}" == "${local_sha}" ]] || fail "remote checksum mismatch"
+
+rclone delete --config "${RCLONE_CONFIG}" \
+    --min-age "${REMOTE_RETENTION_DAYS}d" \
+    --include 'usage-*.sqlite3' "${RCLONE_REMOTE%/}"
+
+mapfile -t local_backups < <(
+    find "${BACKUP_DIR}" -maxdepth 1 -type f -name 'usage-*.sqlite3' \
+        -printf '%T@ %p\n' | sort -rn | cut -d' ' -f2-
+)
+if ((${#local_backups[@]} > LOCAL_COPIES)); then
+    rm -f -- "${local_backups[@]:LOCAL_COPIES}"
+fi
+
+readonly size="$(stat -c '%s' "${final_path}")"
+echo "Jev backup completed: ${filename} size=${size} sha256=${local_sha}"

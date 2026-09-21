@@ -142,6 +142,46 @@ It uses SQLite's backup API and marks the **copy** paused. The live database
 remains active. Choose off-host destination and retention explicitly; this
 command alone is not disaster recovery. Keep dumps out of the repository/image.
 
+Production uses [`infra/tictactoe-jev-backup`](../infra/tictactoe-jev-backup)
+with the matching systemd service and timer in `infra/systemd`. It runs daily at
+02:20 UTC with up to five minutes of randomized delay. The job requires the
+approved host bind mount and permissions, selects a healthy production replica,
+creates the copy through `web.jev_admin`, and checks SQLite integrity, schema,
+tariff and the copy's paused flag. It then uploads to the dedicated
+`grela-tictactoe-jev-backups` R2 bucket and downloads the small object again to
+compare its SHA-256 digest. It keeps 14 local copies and deletes R2 ledger
+objects older than 90 days. A failed upload or validation leaves the local copy
+and fails the unit; it must be monitored rather than treated as success.
+
+The rclone configuration lives only at `/etc/rclone/tictactoe-jev.conf`, owned
+by root with mode 0600. Use a dedicated R2 access key restricted to object
+read/write access for this bucket. Do not reuse Coolify's backup credentials or
+store an R2 secret in the repository, unit file, application environment or
+command history. The root-owned local backup directory is mode 0700 and the
+copies are mode 0600. Installation is incomplete until one manual unit run,
+remote checksum verification, timer inspection and a restore drill have passed.
+
+Create the private bucket and its bucket-scoped key before configuring the host.
+The root-only rclone file has this shape (replace the three placeholders locally;
+do not paste their values into an issue, log or chat):
+
+```ini
+[tictactoe-jev-r2]
+type = s3
+provider = Cloudflare
+access_key_id = <R2_ACCESS_KEY_ID>
+secret_access_key = <R2_SECRET_ACCESS_KEY>
+region = auto
+endpoint = https://<CLOUDFLARE_ACCOUNT_ID>.r2.cloudflarestorage.com
+acl = private
+```
+
+Use the jurisdiction-specific endpoint instead when the bucket has an explicit
+R2 jurisdiction. Install `rclone`, the versioned script and both units, then run
+the service manually. Inspect `systemctl status`, the root-only local file and
+`rclone lsl tictactoe-jev-r2:grela-tictactoe-jev-backups` without printing the
+configuration. Enable the timer only after the restore drill described below.
+
 For restore, first disable/pause Jev in every replica and allow outstanding calls
 to finish. Preserve the current ledger; restore the paused copy with correct
 ownership while writers are stopped. Reconcile against provider spending for
@@ -156,9 +196,11 @@ versions disable Jev. Future schema changes need old/new compatibility tests.
 Rollback to an image without Jev leaves the ledger mounted and unused. Never
 restore an older balance as part of an application rollback.
 
-## Sources reviewed on 2026-09-20
+## Sources reviewed (latest review 2026-09-21)
 
 - [TypeSafe models and tariff](https://docs.typesafe.ai/models)
 - [Choice contract](https://docs.typesafe.ai/primitives/choice)
 - [Python SDK](https://docs.typesafe.ai/sdk/python/usage)
 - [SQLite online backup](https://www.sqlite.org/backup.html)
+- [Cloudflare R2 authentication](https://developers.cloudflare.com/r2/api/tokens/)
+- [rclone Cloudflare R2 configuration](https://rclone.org/s3/#cloudflare-r2)
