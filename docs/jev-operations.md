@@ -162,6 +162,9 @@ copies are mode 0600. Installation is incomplete until one manual unit run,
 remote checksum verification, timer inspection and a restore drill have passed.
 
 Create the private bucket and its bucket-scoped key before configuring the host.
+Add a bucket lifecycle rule with no prefix that deletes objects after 90 days;
+this enforces remote retention even if the VPS job stops running. The script's
+own remote deletion is an independent second enforcement path.
 The root-only rclone file has this shape (replace the three placeholders locally;
 do not paste their values into an issue, log or chat):
 
