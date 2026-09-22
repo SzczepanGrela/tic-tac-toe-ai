@@ -45,10 +45,15 @@ returned a sum of `0.9900000000000001` and passed, while the next returned
 `0.99` and failed at the inclusive `±0.01` boundary. This exposed a binary
 float comparison error in the adapter. The decimal boundary fix was deployed
 on 2026-09-22 as `fb6806f`; the public health endpoint reported that revision
-and the agent list still reported Jev as disabled. The same `±0.01` limit now
-applies consistently. A complete evaluation of the remaining variants is
-required. These attempts do not establish game quality or justify public
-activation.
+and the agent list still reported Jev as disabled. A selective 9×9 K=3 run then
+received contract-valid responses for its opening and both tactics, but Jev
+missed the blocking tactic and the first game stopped before its first move.
+Five isolated opening probes produced sums between `0.98999999999999999` and
+`1`; the rejected value
+exceeded the inclusive lower boundary by only `10^-17`. The next adapter change
+keeps the semantic `±0.01` limit and adds a `10^-12` computation margin for this
+serialization artifact. It requires deployment and another selective run.
+These attempts do not establish game quality or justify public activation.
 
 ## Contract and availability
 
