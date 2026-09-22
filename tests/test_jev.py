@@ -113,11 +113,44 @@ def test_invalid_move_is_not_replaced_by_another_agent(ledger):
     async def exercise():
         service = JevService(client_with_handler(handler), ledger)
         try:
-            with pytest.raises(JevError, match="provider_response_invalid"):
+            with pytest.raises(JevError, match="provider_response_invalid") as exc:
                 await service.select_move(GameState())
+            assert exc.value.diagnostic == "choice_not_in_criteria"
             assert ledger.status()["used_nano_usd"] == 4200
         finally:
             await service.aclose()
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "diagnostic"),
+    [
+        ("probabilities", {"r1c1": 1.0}, "probability_key_mismatch"),
+        ("probabilities", None, "probability_sum_invalid"),
+        ("confidence", 2.0, "confidence_invalid"),
+    ],
+)
+def test_invalid_response_diagnostics_are_controlled(ledger, field, value, diagnostic):
+    def handler(request):
+        payload = json.loads(request.content)
+        data = response_for(payload)
+        if field == "probabilities" and value is None:
+            choices = payload["questions"]["move"]["criteria"]
+            data["answers"]["move"][field] = {key: 0.1 for key in choices}
+        else:
+            data["answers"]["move"][field] = value
+        return httpx2.Response(200, json=data)
+
+    async def exercise():
+        service = JevService(client_with_handler(handler), ledger)
+        try:
+            with pytest.raises(JevError, match="provider_response_invalid") as exc:
+                await service.select_move(GameState())
+            assert exc.value.diagnostic == diagnostic
+            assert str(exc.value) == "provider_response_invalid"
+        finally:
+            await service.aclose()
+
     asyncio.run(exercise())
 
 
