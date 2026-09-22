@@ -14,6 +14,18 @@ from ai.random_player import find_random_move
 from ai.rules import find_best_move as rules_move
 from game.state import GameState
 
+VARIANTS = tuple((n, k) for n in (3, 5, 9) for k in range(3, n + 1))
+
+
+def parse_variant(value: str) -> tuple[int, int]:
+    try:
+        size, length = (int(part) for part in value.split(":"))
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("Variant must be SIZE:K, such as 9:3.") from exc
+    if (size, length) not in VARIANTS:
+        raise argparse.ArgumentTypeError("Unsupported board size or win length.")
+    return size, length
+
 
 def tactical_positions(size: int, length: int):
     win = GameState(size, length)
@@ -68,7 +80,12 @@ def main() -> int:
     parser.add_argument("--confirm-paid-evaluation", required=True, action="store_true")
     parser.add_argument("--output", required=True, help="New private JSONL file; never overwritten")
     parser.add_argument("--games-per-side", type=int, choices=range(1, 101), default=5)
+    parser.add_argument("--variant", type=parse_variant, action="append", metavar="SIZE:K",
+                        help="Evaluate only this board and win length; repeat for multiple variants")
     args = parser.parse_args()
+    variants = args.variant or list(VARIANTS)
+    if len(set(variants)) != len(variants):
+        parser.error("Each variant may be selected only once.")
 
     async def run():
         service = JevService.from_environment()
@@ -83,10 +100,10 @@ def main() -> int:
                     output.flush()
                 emit({"type": "start", "at": datetime.now(timezone.utc).isoformat(),
                       "policy": POLICY_VERSION, "server_revision": os.getenv("RELEASE_REVISION", "development"),
+                      "variants": [f"{size}:{length}" for size, length in variants],
                       "accounting": await asyncio.to_thread(service.ledger.status)})
                 try:
-                    await evaluate(service, emit, games=args.games_per_side,
-                                   variants=[(n, k) for n in (3, 5, 9) for k in range(3, n + 1)])
+                    await evaluate(service, emit, games=args.games_per_side, variants=variants)
                 except JevError as exc:
                     record = {"type": "stopped", "reason": exc.code}
                     if exc.diagnostic is not None:
