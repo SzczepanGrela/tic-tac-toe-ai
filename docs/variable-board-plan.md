@@ -291,7 +291,7 @@ shared transactionally across processes and retained after uncertain calls.
 | G05.2 | complete | PR #24 passed the normal CI and protected digest deployment flow. The production release supports the focused 3×3/5×5/9×9 contract and shipped with Jev disabled. |
 | J01.1 | complete | SDK adapter, capabilities, incremental series, cancellation, shared ledger, private evaluator and mocked/API/browser tests implemented and released in PR #24. |
 | J01.2 | complete | The runtime-only key, shared host directory, version-1 ledger, tariff reconciliation, rolling-mount readback, daily local/R2 backup and isolated restore/reconcile drill passed on the VPS. The script and independent R2 bucket lifecycle rule both enforce 30-day remote retention. |
-| J01.3 | paid evaluation in progress | J01.2; two approved runs stopped before covering all variants. Deploy the probability-sum boundary fix, then confirm every variant's legality/tactics/latency and both sides against Random/Rules within the shared budget; retain private results. Weak play can remain experimental. |
+| J01.3 | paid evaluation in progress | J01.2; two approved runs stopped before covering all variants. The probability-sum boundary fix deployed as `fb6806f`; review completed private results and evaluate remaining variants selectively within the shared budget. Confirm every variant's legality/tactics/latency and both sides against Random/Rules. Weak play can remain experimental. |
 | J01.4 | pending operator activation | G05.2, J01.2, J01.3; enable optional agent, verify human/series paths, disabled/error behavior and retained ledger after recreation/rollback. |
 
 Local evidence: 198 Python 3.12 tests, 15 browser scenarios and image smoke

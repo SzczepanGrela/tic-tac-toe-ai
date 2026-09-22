@@ -43,10 +43,12 @@ stopped during a 5×5 game; the second stopped at the 9×9 K=3 opening with the
 controlled `probability_sum_invalid` diagnostic. An isolated provider call
 returned a sum of `0.9900000000000001` and passed, while the next returned
 `0.99` and failed at the inclusive `±0.01` boundary. This exposed a binary
-float comparison error in the adapter. The adapter now compares decimal values
-at the same `±0.01` limit; a complete evaluation rerun is required after this
-fix reaches production. These attempts do not establish game quality or
-justify public activation.
+float comparison error in the adapter. The decimal boundary fix was deployed
+on 2026-09-22 as `fb6806f`; the public health endpoint reported that revision
+and the agent list still reported Jev as disabled. The same `±0.01` limit now
+applies consistently. A complete evaluation of the remaining variants is
+required. These attempts do not establish game quality or justify public
+activation.
 
 ## Contract and availability
 
@@ -172,6 +174,22 @@ not overwrite prior output. Retain results privately and summarize per variant
 and starting side; do not infer quality from mocked responses. There is no
 minimum playing-strength gate for the experimental label, but legality,
 accounting and usable latency must be confirmed before enabling public play.
+Omitting `--variant` evaluates every variant in order. To avoid paying again
+for variants completed in an earlier report, repeat `--variant SIZE:K` for only
+the variants still needed, using a new output file. For example, a small 9×9
+K=3 pass is:
+
+```bash
+python -m web.jev_evaluate --confirm-paid-evaluation \
+  --games-per-side 1 --variant 9:3 \
+  --output /var/lib/tictactoe/jev/jev-evaluation-9-3.jsonl
+```
+
+The private `start` record lists the selected variants. A selected variant
+starts from its opening; it does not resume an interrupted game. Duplicate or
+unsupported selections fail before the provider client is initialized. Review
+completed games in earlier private reports separately before selecting a new
+scope; never count an interrupted game as completed.
 If a provider response fails the application contract, the public API keeps the
 single `provider_response_invalid` error while this private file adds only a
 controlled diagnostic category. It never stores the raw provider response,
