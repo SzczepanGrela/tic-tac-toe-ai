@@ -1,9 +1,41 @@
 # Optional Jev agent
 
-Implementation and local validation dated 2026-09-20. No production activation
-or paid provider evaluation has been performed by this change. The operator
-approves deployment, runtime credentials/storage and paid evaluation separately.
-MCTS can ship first with `JEV_ENABLED=false` (the default).
+Implementation and local validation dated 2026-09-20. The disabled integration,
+runtime credentials, persistent accounting storage and backup/recovery path
+passed production acceptance on 2026-09-21. No paid provider evaluation or
+public Jev activation has been performed. The operator approves paid evaluation
+and activation separately. MCTS shipped with `JEV_ENABLED=false` (the default).
+
+## Production acceptance checkpoint
+
+The accepted production state on 2026-09-21 is:
+
+- PR #24 deployed the optional integration and 5×5 MCTS; `JEV_ENABLED=false`
+  keeps Jev unavailable to public requests while local agents remain healthy.
+- Coolify supplies a dedicated runtime-only provider key and
+  `JEV_USAGE_DB=/var/lib/tictactoe/jev/usage.sqlite3`. Key presence was checked
+  without printing its value.
+- The application mounts `/var/lib/tictactoe/jev` read/write from the host. The
+  directory is mode 0700, the SQLite database is mode 0600, and both belong to
+  UID/GID 10001 used by the image. A rolling replacement retained the ledger;
+  a write probe from the replacement container passed.
+- The version-1 ledger passed `quick_check` and was reconciled to verified zero
+  provider spend for September 2026 at tariff `jev-1.13.0:0.042/M`. Status was
+  available with the full $1 monthly application limit before any paid call.
+- PRs #26 and #27 supplied the systemd backup and R2 compatibility controls.
+  rclone 1.75.1 uploaded a paused 20,480-byte copy, downloaded it again and
+  matched its SHA-256 digest. The root-owned local copy remained mode 0600.
+- An isolated restore drill downloaded the R2 object, confirmed that it failed
+  closed while paused, reconciled the copy explicitly, rechecked the unaffected
+  live ledger and removed the test file.
+- A subsequent run of the installed script succeeded, and
+  `tictactoe-jev-backup.timer` was enabled and active for 02:20 UTC daily with
+  up to five minutes of randomized delay.
+
+On 2026-09-22 the operator confirmed that the independent R2 bucket lifecycle
+rule was changed from 90 to 30 days, matching the script. The remaining work is
+to run the approved paid evaluation, review its private results and only then
+decide whether to set `JEV_ENABLED=true`.
 
 ## Contract and availability
 
