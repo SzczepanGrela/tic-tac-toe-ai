@@ -161,6 +161,10 @@ not overwrite prior output. Retain results privately and summarize per variant
 and starting side; do not infer quality from mocked responses. There is no
 minimum playing-strength gate for the experimental label, but legality,
 accounting and usable latency must be confirmed before enabling public play.
+If a provider response fails the application contract, the public API keeps the
+single `provider_response_invalid` error while this private file adds only a
+controlled diagnostic category. It never stores the raw provider response,
+credentials or request headers.
 
 ## Backup, recovery and rollback
 

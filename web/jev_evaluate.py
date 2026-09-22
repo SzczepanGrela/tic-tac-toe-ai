@@ -88,7 +88,10 @@ def main() -> int:
                     await evaluate(service, emit, games=args.games_per_side,
                                    variants=[(n, k) for n in (3, 5, 9) for k in range(3, n + 1)])
                 except JevError as exc:
-                    emit({"type": "stopped", "reason": exc.code})
+                    record = {"type": "stopped", "reason": exc.code}
+                    if exc.diagnostic is not None:
+                        record["diagnostic"] = exc.diagnostic
+                    emit(record)
                     return 1
                 emit({"type": "complete", "accounting": await asyncio.to_thread(service.ledger.status)})
             return 0

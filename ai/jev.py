@@ -22,10 +22,19 @@ logger = logging.getLogger(__name__)
 
 
 class JevError(Exception):
-    def __init__(self, code: str, status: int = 503) -> None:
+    def __init__(self, code: str, status: int = 503, *, diagnostic: str | None = None) -> None:
         super().__init__(code)
         self.code = code
         self.status = status
+        self.diagnostic = diagnostic
+
+
+def _invalid_response(diagnostic: str) -> JevError:
+    # Keep upstream payloads out of logs and public errors. The controlled
+    # category is sufficient for a private evaluation to locate our failed
+    # contract check without exposing prompts, probabilities or credentials.
+    logger.warning("Jev provider response rejected diagnostic=%s", diagnostic)
+    return JevError("provider_response_invalid", 502, diagnostic=diagnostic)
 
 
 class JevService:
@@ -187,19 +196,24 @@ class JevService:
                     response = await self.client.system_one(state=context, questions=questions, model=MODEL)
                     if response.model != MODEL:
                         await asyncio.to_thread(self.ledger.pause)
-                        raise JevError("provider_response_invalid", 502)
+                        raise _invalid_response("model_mismatch")
                     # The provider can omit usage: retain the full reservation then.
                     if response.usage.input_tokens is not None:
                         await asyncio.to_thread(self.ledger.settle, reservation, response.usage.input_tokens)
                     answer = response.choices.get("move")
-                    if answer is None or answer.choice not in moves:
-                        raise JevError("provider_response_invalid", 502)
+                    if answer is None:
+                        raise _invalid_response("missing_choice_answer")
+                    if answer.choice not in moves:
+                        raise _invalid_response("choice_not_in_criteria")
                     probabilities = answer.probabilities
-                    if (set(probabilities) != set(moves)
-                            or any(not math.isfinite(p) or not 0 <= p <= 1 for p in probabilities.values())
-                            or not math.isclose(sum(probabilities.values()), 1.0, abs_tol=0.01)
-                            or not math.isfinite(answer.confidence) or not 0 <= answer.confidence <= 1):
-                        raise JevError("provider_response_invalid", 502)
+                    if set(probabilities) != set(moves):
+                        raise _invalid_response("probability_key_mismatch")
+                    if any(not math.isfinite(p) or not 0 <= p <= 1 for p in probabilities.values()):
+                        raise _invalid_response("probability_value_invalid")
+                    if not math.isclose(sum(probabilities.values()), 1.0, abs_tol=0.01):
+                        raise _invalid_response("probability_sum_invalid")
+                    if not math.isfinite(answer.confidence) or not 0 <= answer.confidence <= 1:
+                        raise _invalid_response("confidence_invalid")
                     logger.info("Jev move accounted model=%s prompt=%s reservation=%s", MODEL, PROMPT_VERSION, reservation)
                     return moves[answer.choice], {**metadata, "model": response.model}
             except BudgetExhausted as exc:
@@ -210,7 +224,7 @@ class JevService:
                 self._unavailable_until = time.monotonic() + 60
                 raise JevError("provider_timeout", 504) from exc
             except TypeSafeAPIResponseValidationError as exc:
-                raise JevError("provider_response_invalid", 502) from exc
+                raise _invalid_response("response_schema_invalid") from exc
             except TypeSafeError as exc:
                 # No raw upstream text, URLs, headers or credentials in HTTP errors.
                 self._unavailable_until = time.monotonic() + 60
