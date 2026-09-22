@@ -2,9 +2,10 @@
 
 Implementation and local validation dated 2026-09-20. The disabled integration,
 runtime credentials, persistent accounting storage and backup/recovery path
-passed production acceptance on 2026-09-21. No paid provider evaluation or
-public Jev activation has been performed. The operator approves paid evaluation
-and activation separately. MCTS shipped with `JEV_ENABLED=false` (the default).
+passed production acceptance on 2026-09-21. Paid provider evaluation began on
+2026-09-22 but has not completed. Public Jev activation has not been performed.
+The operator approves paid evaluation and activation separately. MCTS shipped
+with `JEV_ENABLED=false` (the default).
 
 ## Production acceptance checkpoint
 
@@ -34,8 +35,18 @@ The accepted production state on 2026-09-21 is:
 
 On 2026-09-22 the operator confirmed that the independent R2 bucket lifecycle
 rule was changed from 90 to 30 days, matching the script. The remaining work is
-to run the approved paid evaluation, review its private results and only then
-decide whether to set `JEV_ENABLED=true`.
+to complete the approved paid evaluation, review its private results and only
+then decide whether to set `JEV_ENABLED=true`.
+
+Two paid evaluation attempts stopped before covering every variant. The first
+stopped during a 5×5 game; the second stopped at the 9×9 K=3 opening with the
+controlled `probability_sum_invalid` diagnostic. An isolated provider call
+returned a sum of `0.9900000000000001` and passed, while the next returned
+`0.99` and failed at the inclusive `±0.01` boundary. This exposed a binary
+float comparison error in the adapter. The adapter now compares decimal values
+at the same `±0.01` limit; a complete evaluation rerun is required after this
+fix reaches production. These attempts do not establish game quality or
+justify public activation.
 
 ## Contract and availability
 
