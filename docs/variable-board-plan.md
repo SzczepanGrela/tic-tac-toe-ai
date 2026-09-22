@@ -3,9 +3,12 @@
 Status: the initial variable-board release was reviewed, merged, and deployed
 to production on 2026-09-18. The focused 3×3/5×5/9×9 follow-up was merged as
 PR #23 (`0e38480f17b7fd2c17fc0bb5f7a3dc4c58fd0488`) and passed Quality and
-protected deployment in run `35506078903`. On 2026-09-20, G05 and the J01 local
-implementation were prepared on `feature/mcts-jev`; their CI/release and Jev's
-operator activation remain pending. Measurements are development-machine
+protected deployment in run `35506078903`. G05 and the J01 implementation were
+merged as PR #24 (`4141e3a69f68d784eed792b8dea9be905d66c720`) and deployed
+with Jev disabled. Durable backup support followed in PRs #26 and #27. On
+2026-09-21 the production mount, ledger, rolling persistence, off-host backup
+and restore procedure passed operator acceptance. Paid provider evaluation and
+public Jev activation remain pending. Measurements are development-machine
 observations unless explicitly described otherwise.
 
 Product scope update (2026-09-20): after the initial 3×3–10×10 release was
@@ -62,7 +65,7 @@ remaining time of the shared 45-second command; it has no usable measurement.
 | Random | Every supported `(N,K)` | None beyond correctness tests | No |
 | Rules | Every `(N,K)` that passes G04/G06; intended coverage is all variants | General line scoring, tactical tests, performance tuning | No |
 | Minimax | Existing 3x3 only | Optional bounded heuristic search, clearly distinguished from exact search | No |
-| MCTS | Existing 3x3; expand after G05/G06 passes per variant | General rollout policy and bounded search | No |
+| MCTS | 3×3 and 5×5 K=3/4/5 | Optional separately evaluated 9×9 policy | No |
 | Q-learning | Existing 3x3 only | A new table/training experiment would be a separate project | Yes for larger variants |
 | DQN | Existing 3x3 only | New architecture, data and evaluation | Yes for larger variants |
 | Imitation | Existing 3x3 only | New architecture and scalable teacher | Yes for larger variants |
@@ -77,7 +80,7 @@ variants are capability information, not a failed application healthcheck.
 
 IDs remain stable. `local-complete` means the implementation and focused local
 validation are complete but says nothing about CI, merge, or production.
-G05, J01 and T01 do not block the first release.
+G05, J01 and T01 did not block the first release.
 
 | ID | Status | Task | Depends on | Completion condition / evidence |
 | --- | --- | --- | --- | --- |
@@ -85,10 +88,10 @@ G05, J01 and T01 do not block the first release.
 | G02 | complete (2026-09-18) | API contract and agent capabilities | G01 | Rules propagated; incompatible agents return 422; absent fields retain 3×3; capabilities include revision, policy and work profile. |
 | G03 | complete (2026-09-18) | Variable board, controls and incremental series | G02 | Dynamic 3×3–10×10 UI, SVG result marker, keyboard navigation, cancellation, paced incremental series, calculation pause/step and replay covered by browser tests. |
 | G04 | complete (2026-09-18) | General Rules agent | G01, G02 | All variants enabled; wins, blocks, centre selection and legal moves tested; 2,160-sample development benchmark passed. |
-| G05 | local-complete (2026-09-20), release pending | MCTS for 5×5 K=3/4/5 | G01, G02, G04 | Fixed 256-simulation profiles passed legal/tactical, seed, resource and >=90% non-loss-vs-Random gates; [measurements](mcts-5x5.md). 9×9 disabled. |
+| G05 | complete (2026-09-20) | MCTS for 5×5 K=3/4/5 | G01, G02, G04 | Fixed 256-simulation profiles passed legal/tactical, seed, resource and >=90% non-loss-vs-Random gates; [measurements](mcts-5x5.md). PR #24 passed CI and protected production deployment with Jev disabled. 9×9 remains disabled. |
 | G06 | complete (2026-09-18) | Resource limits and release validation | G03, G04; G05 if included | Queue, cancellation ownership, deadlines, larger smoke, Python 3.12 API suite and production-sized local container passed. |
 | G07 | complete (2026-09-18) | Documentation and controlled release | G06 | PRs #21 and #22 merged; protected digest deployment and public 3×3/10×10 smoke passed for revision `c71b9f91ab7b71834a660516ddb2fac770e866ae`. |
-| J01 | partial (2026-09-20) | Optional Jev integration | G02, G03, G06 | Adapter/UI, durable spend control and mocked tests implemented; paid evaluation, mounted-ledger acceptance and public activation pending. See subtasks below. |
+| J01 | partial (updated 2026-09-22) | Optional Jev integration | G02, G03, G06 | Adapter/UI, durable spend control, mounted-ledger acceptance and tested off-host recovery are complete. Paid evaluation and public activation remain. See subtasks below. |
 | T01 | deferred | Optional learned policies for larger boards | G01, G04, G06 | Architecture, training budget, teacher/rewards and promotion criteria require a separate project. |
 
 ### G01 — Rules and engine
@@ -282,12 +285,12 @@ service. There is no cache, hidden local fallback or automatic provider retry.
 The $1 UTC-month ledger includes a $0.25 evaluation sublimit; reservations are
 shared transactionally across processes and retained after uncertain calls.
 
-| Subtask | Status on 2026-09-20 | Dependency and completion condition |
+| Subtask | Status on 2026-09-22 | Dependency and completion condition |
 | --- | --- | --- |
-| G05.1 | local-complete | 5×5 policy, tactical/seed tests and production-sized benchmark passed; all three K profiles enabled locally. |
-| G05.2 | pending operator release | G05.1; normal CI/PR/production approval and public 3×3/5×5/9×9 smoke. Ship with Jev disabled first. |
-| J01.1 | local-complete | SDK adapter, capabilities, incremental series, cancellation, shared ledger, private evaluator and mocked/API/browser tests implemented. |
-| J01.2 | pending operator setup | J01.1; runtime-only key, same-host directory, versioned ledger, tariff confirmation, backup/restore and rolling-mount readback. Local process tests are not VPS acceptance. |
+| G05.1 | complete | 5×5 policy, tactical/seed tests and production-sized benchmark passed; all three K profiles are enabled. |
+| G05.2 | complete | PR #24 passed the normal CI and protected digest deployment flow. The production release supports the focused 3×3/5×5/9×9 contract and shipped with Jev disabled. |
+| J01.1 | complete | SDK adapter, capabilities, incremental series, cancellation, shared ledger, private evaluator and mocked/API/browser tests implemented and released in PR #24. |
+| J01.2 | complete | The runtime-only key, shared host directory, version-1 ledger, tariff reconciliation, rolling-mount readback, daily local/R2 backup and isolated restore/reconcile drill passed on the VPS. The script and independent R2 bucket lifecycle rule both enforce 30-day remote retention. |
 | J01.3 | pending paid evaluation | J01.2; explicit approval, every variant's legality/tactics/latency and both sides against Random/Rules within the shared budget; retain private results. Weak play can remain experimental. |
 | J01.4 | pending operator activation | G05.2, J01.2, J01.3; enable optional agent, verify human/series paths, disabled/error behavior and retained ledger after recreation/rollback. |
 
@@ -295,9 +298,23 @@ Local evidence: 198 Python 3.12 tests, 15 browser scenarios and image smoke
 passed. Cases include simultaneous queue bursts, missing/paused accounting,
 two-process budget contention, process crash, month rollover, backup/reconcile,
 upstream failures without retries, disconnect cancellation, and completed-game
-replay after stop/error. SDK tests mock HTTP; no paid calls or VPS mutations
-were made. The game's local policies remain stateless; enabling Jev introduces
-persistent accounting and therefore requires the separate J01.2 acceptance.
+replay after stop/error. SDK tests mock HTTP; that implementation stage made no
+paid calls or VPS mutations. The game's local policies remain stateless;
+enabling Jev introduces persistent accounting and therefore required the
+separate J01.2 production acceptance recorded below.
+
+Production acceptance on 2026-09-21 used the non-root image user and a shared
+read/write bind mount at `/var/lib/tictactoe/jev`. The mode-0700 host directory
+and mode-0600 database were owned by UID/GID 10001. A rolling replacement kept
+the mount and initialized ledger, and a container write probe succeeded. The
+ledger was reconciled to verified zero provider spend under tariff
+`jev-1.13.0:0.042/M`, while `JEV_ENABLED=false` prevented paid application
+calls. PRs #26 and #27 added the backup job and R2 compatibility controls.
+rclone 1.75.1 created and read back a 20,480-byte paused copy with a matching
+SHA-256 digest. Restoring that object to an isolated path failed closed while
+paused, resumed only after explicit reconciliation, and did not alter the live
+ledger. The test copy was removed. The verified backup script was installed and
+its systemd timer enabled for 02:20 UTC daily with up to five minutes of jitter.
 
 **T01 — Larger learned policies:** choose separate models per variant or a
 spatial network trained on multiple sizes. Supply rule information and mask
@@ -313,8 +330,8 @@ G01-G04 and G06-G07 are complete with evidence. Every size 3-10 supports local
 play, Random and the accepted generalized Rules policy in all three play modes.
 Unsupported agent/rule combinations fail clearly. Original 3x3 models still
 work, larger games produce valid replay/outcomes, and bounded concurrent load
-does not compromise application readiness. Larger-board MCTS, Jev and new
-training are independently tracked follow-ups.
+does not compromise application readiness. Jev and new training remain
+independently tracked follow-ups; the later G05 release added accepted 5×5 MCTS.
 
 The initial release definition was satisfied on 2026-09-18. The later product
 decision to expose only 3×3, 5×5, and 9×9 does not invalidate the broader

@@ -155,3 +155,9 @@ the script as `/usr/local/libexec/grela-infra/tictactoe-jev-backup`, install the
 units under `/etc/systemd/system`, and keep the bucket-scoped R2 credentials in
 the root-only `/etc/rclone/tictactoe-jev.conf`. Do not enable the timer until a
 manual run and restore drill have succeeded.
+
+The first production acceptance completed on 2026-09-21 with rclone 1.75.1,
+successful upload/readback verification, an isolated fail-closed restore and an
+active daily timer. The application remains at `JEV_ENABLED=false` pending paid
+evaluation. Keep the script's 30-day remote retention aligned with the bucket's
+independent lifecycle rule.
