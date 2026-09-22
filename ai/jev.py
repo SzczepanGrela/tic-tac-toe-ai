@@ -7,6 +7,7 @@ import math
 import os
 import time
 from contextlib import asynccontextmanager
+from decimal import Decimal
 
 from typesafe_sdk import (
     AsyncTypeSafeClient, Choice, RetryPolicy, TypeSafeError,
@@ -210,7 +211,11 @@ class JevService:
                         raise _invalid_response("probability_key_mismatch")
                     if any(not math.isfinite(p) or not 0 <= p <= 1 for p in probabilities.values()):
                         raise _invalid_response("probability_value_invalid")
-                    if not math.isclose(sum(probabilities.values()), 1.0, abs_tol=0.01):
+                    # Decimal preserves the intended inclusive 0.01 boundary for
+                    # provider values such as 0.99; binary float comparison can
+                    # reject 0.99 while accepting 0.9900000000000001.
+                    probability_sum = sum((Decimal(str(p)) for p in probabilities.values()), Decimal(0))
+                    if abs(probability_sum - Decimal(1)) > Decimal("0.01"):
                         raise _invalid_response("probability_sum_invalid")
                     if not math.isfinite(answer.confidence) or not 0 <= answer.confidence <= 1:
                         raise _invalid_response("confidence_invalid")

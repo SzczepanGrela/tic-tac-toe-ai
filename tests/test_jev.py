@@ -154,6 +154,39 @@ def test_invalid_response_diagnostics_are_controlled(ledger, field, value, diagn
     asyncio.run(exercise())
 
 
+@pytest.mark.parametrize(
+    ("values", "valid"),
+    [([0.33, 0.33, 0.33], True),
+     ([0.33, 0.33, 0.32], False),
+     ([0.34, 0.34, 0.33], True),
+     ([0.34, 0.34, 0.34], False)],
+)
+def test_probability_sum_includes_decimal_boundary_for_large_board(ledger, values, valid):
+    def handler(request):
+        payload = json.loads(request.content)
+        data = response_for(payload)
+        probabilities = data["answers"]["move"]["probabilities"]
+        for key, value in zip(probabilities, values):
+            probabilities[key] = value
+        return httpx2.Response(200, json=data)
+
+    async def exercise():
+        service = JevService(client_with_handler(handler), ledger)
+        try:
+            state = GameState(rules=GameRules(9, 3))
+            if valid:
+                move, _ = await service.select_move(state)
+                assert move == (0, 0)
+            else:
+                with pytest.raises(JevError) as exc:
+                    await service.select_move(state)
+                assert exc.value.diagnostic == "probability_sum_invalid"
+        finally:
+            await service.aclose()
+
+    asyncio.run(exercise())
+
+
 def test_unknown_usage_keeps_maximum_charge(ledger):
     def handler(request):
         return httpx2.Response(200, json=response_for(json.loads(request.content), usage={}))
