@@ -157,9 +157,11 @@ def test_invalid_response_diagnostics_are_controlled(ledger, field, value, diagn
 
 @pytest.mark.parametrize(
     ("values", "valid"),
-    [([0.33, 0.33, 0.33], True),
+    [([0.33, 0.33, 0.32999999999999996], True),
+     ([0.34, 0.34, 0.33000000000000007], True),
+     ([0.33, 0.33, 0.329999999998], False),
+     ([0.34, 0.34, 0.330000000002], False),
      ([0.33, 0.33, 0.32], False),
-     ([0.34, 0.34, 0.33], True),
      ([0.34, 0.34, 0.34], False)],
 )
 def test_probability_sum_includes_decimal_boundary_for_large_board(ledger, values, valid):

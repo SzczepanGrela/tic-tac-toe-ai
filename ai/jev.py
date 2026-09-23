@@ -19,6 +19,8 @@ from web.jev_budget import BudgetExhausted, BudgetLedger, DEFAULT_PATH, LedgerUn
 
 PROMPT_VERSION = "jev-game-v2"
 POLICY_VERSION = f"{MODEL}:{PROMPT_VERSION}"
+PROBABILITY_SUM_TOLERANCE = Decimal("0.01")
+PROBABILITY_ROUNDING_MARGIN = Decimal("0.000000000001")
 logger = logging.getLogger(__name__)
 
 
@@ -211,11 +213,13 @@ class JevService:
                         raise _invalid_response("probability_key_mismatch")
                     if any(not math.isfinite(p) or not 0 <= p <= 1 for p in probabilities.values()):
                         raise _invalid_response("probability_value_invalid")
-                    # Decimal preserves the intended inclusive 0.01 boundary for
-                    # provider values such as 0.99; binary float comparison can
-                    # reject 0.99 while accepting 0.9900000000000001.
+                    # Keep the semantic tolerance at 0.01. The much smaller
+                    # margin only absorbs serialization artifacts observed at
+                    # the inclusive boundary, such as 0.98999999999999999.
                     probability_sum = sum((Decimal(str(p)) for p in probabilities.values()), Decimal(0))
-                    if abs(probability_sum - Decimal(1)) > Decimal("0.01"):
+                    if abs(probability_sum - Decimal(1)) > (
+                        PROBABILITY_SUM_TOLERANCE + PROBABILITY_ROUNDING_MARGIN
+                    ):
                         raise _invalid_response("probability_sum_invalid")
                     if not math.isfinite(answer.confidence) or not 0 <= answer.confidence <= 1:
                         raise _invalid_response("confidence_invalid")
