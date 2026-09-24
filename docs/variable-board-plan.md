@@ -8,8 +8,10 @@ merged as PR #24 (`4141e3a69f68d784eed792b8dea9be905d66c720`) and deployed
 with Jev disabled. Durable backup support followed in PRs #26 and #27. On
 2026-09-21 the production mount, ledger, rolling persistence, off-host backup
 and restore procedure passed operator acceptance. Paid provider evaluation and
-public Jev activation remain pending. Measurements are development-machine
-observations unless explicitly described otherwise.
+public Jev activation remain pending. Production evaluation has completed every
+variant through 9×9 K=8; K=9 is deferred to the October evaluation allowance.
+Measurements are development-machine observations unless explicitly described
+otherwise.
 
 Product scope update (2026-09-20): after the initial 3×3–10×10 release was
 validated, the operator narrowed the public board-size choices to 3×3, 5×5,
@@ -91,7 +93,7 @@ G05, J01 and T01 did not block the first release.
 | G05 | complete (2026-09-20) | MCTS for 5×5 K=3/4/5 | G01, G02, G04 | Fixed 256-simulation profiles passed legal/tactical, seed, resource and >=90% non-loss-vs-Random gates; [measurements](mcts-5x5.md). PR #24 passed CI and protected production deployment with Jev disabled. 9×9 remains disabled. |
 | G06 | complete (2026-09-18) | Resource limits and release validation | G03, G04; G05 if included | Queue, cancellation ownership, deadlines, larger smoke, Python 3.12 API suite and production-sized local container passed. |
 | G07 | complete (2026-09-18) | Documentation and controlled release | G06 | PRs #21 and #22 merged; protected digest deployment and public 3×3/10×10 smoke passed for revision `c71b9f91ab7b71834a660516ddb2fac770e866ae`. |
-| J01 | partial (updated 2026-09-22) | Optional Jev integration | G02, G03, G06 | Adapter/UI, durable spend control, mounted-ledger acceptance and tested off-host recovery are complete. Paid evaluation and public activation remain. See subtasks below. |
+| J01 | partial (updated 2026-09-24) | Optional Jev integration | G02, G03, G06 | Adapter/UI, durable spend control, mounted-ledger acceptance and tested off-host recovery are complete. Paid evaluation is complete through 9×9 K=8; K=9 and public activation remain. See subtasks below. |
 | T01 | deferred | Optional learned policies for larger boards | G01, G04, G06 | Architecture, training budget, teacher/rewards and promotion criteria require a separate project. |
 
 ### G01 — Rules and engine
@@ -285,13 +287,13 @@ service. There is no cache, hidden local fallback or automatic provider retry.
 The $1 UTC-month ledger includes a $0.25 evaluation sublimit; reservations are
 shared transactionally across processes and retained after uncertain calls.
 
-| Subtask | Status on 2026-09-22 | Dependency and completion condition |
+| Subtask | Status on 2026-09-24 | Dependency and completion condition |
 | --- | --- | --- |
 | G05.1 | complete | 5×5 policy, tactical/seed tests and production-sized benchmark passed; all three K profiles are enabled. |
 | G05.2 | complete | PR #24 passed the normal CI and protected digest deployment flow. The production release supports the focused 3×3/5×5/9×9 contract and shipped with Jev disabled. |
 | J01.1 | complete | SDK adapter, capabilities, incremental series, cancellation, shared ledger, private evaluator and mocked/API/browser tests implemented and released in PR #24. |
 | J01.2 | complete | The runtime-only key, shared host directory, version-1 ledger, tariff reconciliation, rolling-mount readback, daily local/R2 backup and isolated restore/reconcile drill passed on the VPS. The script and independent R2 bucket lifecycle rule both enforce 30-day remote retention. |
-| J01.3 | paid evaluation in progress | J01.2; prior runs stopped before covering all variants. The decimal fix deployed as `fb6806f`, selective evaluation as `92daf8e`, and a final `10^-12` boundary margin remains to deploy. The 9×9 K=3 win tactic passed while its block tactic failed. Review completed private results and evaluate remaining variants selectively within the shared budget; confirm legality, latency and both sides against Random/Rules. Weak play can remain experimental. |
+| J01.3 | paid evaluation in progress | J01.2; PR #32 deployed the final boundary margin as `6151c71`. The earlier report completed 3×3 and all 5×5 variants. Selective 20-game production reports completed 9×9 K=3–8 with legal responses and usable latency; Jev was consistently weaker than Rules and tactical results varied. K=9 is deferred until the evaluation sublimit resets on 2026-10-01 because its estimated cost exceeds the September allowance remaining after K=8. Complete K=9, then review all private reports. Weak play can remain experimental. |
 | J01.4 | pending operator activation | G05.2, J01.2, J01.3; enable optional agent, verify human/series paths, disabled/error behavior and retained ledger after recreation/rollback. |
 
 Local evidence: 198 Python 3.12 tests, 15 browser scenarios and image smoke

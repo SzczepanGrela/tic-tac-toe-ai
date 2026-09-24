@@ -3,7 +3,9 @@
 Implementation and local validation dated 2026-09-20. The disabled integration,
 runtime credentials, persistent accounting storage and backup/recovery path
 passed production acceptance on 2026-09-21. Paid provider evaluation began on
-2026-09-22 but has not completed. Public Jev activation has not been performed.
+2026-09-22 and has completed every variant through 9×9 K=8. The final 9×9
+K=9 pass is deferred until the evaluation sublimit resets on 2026-10-01. Public
+Jev activation has not been performed.
 The operator approves paid evaluation and activation separately. MCTS shipped
 with `JEV_ENABLED=false` (the default).
 
@@ -38,7 +40,7 @@ rule was changed from 90 to 30 days, matching the script. The remaining work is
 to complete the approved paid evaluation, review its private results and only
 then decide whether to set `JEV_ENABLED=true`.
 
-Two paid evaluation attempts stopped before covering every variant. The first
+Two initial paid evaluation attempts stopped before covering every variant. The first
 stopped during a 5×5 game; the second stopped at the 9×9 K=3 opening with the
 controlled `probability_sum_invalid` diagnostic. An isolated provider call
 returned a sum of `0.9900000000000001` and passed, while the next returned
@@ -50,10 +52,46 @@ received contract-valid responses for its opening and both tactics, but Jev
 missed the blocking tactic and the first game stopped before its first move.
 Five isolated opening probes produced sums between `0.98999999999999999` and
 `1`; the rejected value
-exceeded the inclusive lower boundary by only `10^-17`. The next adapter change
-keeps the semantic `±0.01` limit and adds a `10^-12` computation margin for this
-serialization artifact. It requires deployment and another selective run.
-These attempts do not establish game quality or justify public activation.
+exceeded the inclusive lower boundary by only `10^-17`. PR #32 deployed as
+`6151c71` keeps the semantic `±0.01` limit and adds a `10^-12` computation
+margin for this serialization artifact. Selective production runs after that
+release completed without another contract rejection.
+
+## Paid evaluation checkpoint — 2026-09-24
+
+The earlier full report on revision `45a7ffe` completed 20 games for each of
+3×3 K=3 and 5×5 K=3/4/5 before the old probability boundary check stopped at
+the 9×9 opening. Selective private reports after the fix covered 9×9 K=3–8.
+Together they produced the following operator-reviewed evidence. Results use
+`W/D/L` for Jev wins, draws and losses, split by the side played by Jev:
+
+| Variant | Games / Jev moves | Win / block tactic | Results | Jev move latency |
+| --- | ---: | --- | --- | --- |
+| 3×3 K=3 | 20 / 75 | pass / fail | Random X: 3/0/2, O: 2/0/3; Rules X: 0/0/5, O: 0/5/0 | avg 0.276 s; p95 0.333 s; max 0.743 s |
+| 5×5 K=3 | 20 / 68 | fail / fail | Random X: 5/0/0, O: 4/0/1; Rules X: 5/0/0, O: 0/0/5 | avg 0.268 s; p95 0.318 s; max 0.328 s |
+| 5×5 K=4 | 20 / 101 | pass / pass | Random X: 5/0/0, O: 4/0/1; Rules X: 0/0/5, O: 0/0/5 | avg 0.277 s; p95 0.336 s; max 0.415 s |
+| 5×5 K=5 | 20 / 162 | pass / pass | Random X: 4/1/0, O: 2/2/1; Rules X: 0/1/4, O: 0/0/5 | avg 0.279 s; p95 0.340 s; max 0.369 s |
+| 9×9 K=3 | 20 / 78 | pass / fail | Random X: 5/0/0, O: 5/0/0; Rules X: 2/0/3, O: 0/0/5 | avg 0.324 s; p95 0.394 s; max 0.489 s |
+| 9×9 K=4 | 20 / 92 | pass / pass | Random X: 5/0/0, O: 5/0/0; Rules X: 0/0/5, O: 0/0/5 | avg 0.330 s; p95 0.415 s; max 0.529 s |
+| 9×9 K=5 | 20 / 111 | pass / pass | Random X: 5/0/0, O: 5/0/0; Rules X: 0/0/5, O: 0/0/5 | avg 0.337 s; p95 0.445 s; max 0.585 s |
+| 9×9 K=6 | 20 / 141 | pass / fail | Random X: 5/0/0, O: 5/0/0; Rules X: 0/0/5, O: 0/0/5 | avg 0.475 s; p95 1.590 s; max 4.144 s |
+| 9×9 K=7 | 20 / 268 | pass / pass | Random X: 5/0/0, O: 5/0/0; Rules X: 0/0/5, O: 0/0/5 | avg 0.270 s; p95 0.321 s; max 0.649 s |
+| 9×9 K=8 | 20 / 361 | fail / pass | Random X: 3/1/1, O: 3/1/1; Rules X: 0/0/5, O: 0/0/5 | avg 0.475 s; p95 0.816 s; max 3.755 s |
+
+All 20-game variant samples in the table completed. The selective 9×9 reports
+emitted `complete`, with no interrupted game or `stopped` record. Legal response
+validation and usable latency are therefore confirmed through K=8. Playing
+strength is generally weak against Rules and tactical fixture results vary by
+winning length; that is acceptable only under the documented experimental label
+and must be visible in the activation decision.
+
+After K=8 the September ledger reported `$0.175312662` total use, including the
+earlier evaluation attempts and isolated diagnostics. About `$0.0747` remained
+inside the `$0.25` evaluation sublimit. A 20-game K=9 run is expected to need
+roughly 800 Jev moves and about `$0.08`, so it was deliberately deferred until
+the UTC-month reset instead of being allowed to stop part-way. `JEV_ENABLED`
+remains `false`. This checkpoint does not establish K=9 quality or justify
+public activation.
 
 ## Contract and availability
 
@@ -195,6 +233,11 @@ starts from its opening; it does not resume an interrupted game. Duplicate or
 unsupported selections fail before the provider client is initialized. Review
 completed games in earlier private reports separately before selecting a new
 scope; never count an interrupted game as completed.
+Each invocation assigns game seeds from `30000` again. Reducing
+`--games-per-side` and later running the same variant repeats the lower-numbered
+seeds; it is not a continuation. If the remaining monthly evaluation allowance
+cannot cover the intended sample, wait for the next UTC month and run the full
+sample rather than paying for duplicated partial coverage.
 If a provider response fails the application contract, the public API keeps the
 single `provider_response_invalid` error while this private file adds only a
 controlled diagnostic category. It never stores the raw provider response,
