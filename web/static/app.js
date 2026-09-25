@@ -27,6 +27,7 @@ let activeController = null;
 let gameRevision = 0;
 let capabilityRevision = 0;
 let statusState = {key: 'ready', params: {}};
+let rovingCellIndex = 0;
 
 function getCookie(name) {
   const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
@@ -99,6 +100,31 @@ function populateAgentSelectors() {
     if (selectedOption) select.value = selected;
     else if (fallback) select.value = fallback.value;
   }
+  renderAgentAvailability();
+  updateSettingsSummary();
+}
+
+function renderAgentAvailability() {
+  const details = $('#agent-availability');
+  const list = $('#unavailable-agents');
+  list.replaceChildren();
+  for (const [id, capability] of capabilities) {
+    if (capability.available) continue;
+    const item = document.createElement('li');
+    item.textContent = `${agentName(id)}: ${t(`unavailable.${capability.reason || 'unavailable'}`)}`;
+    list.appendChild(item);
+  }
+  details.classList.toggle('hidden', mode === 'local' || list.children.length === 0);
+}
+
+function updateSettingsSummary() {
+  const {boardSize, winLength} = selectedRules();
+  if (!boardSize || !winLength) return;
+  $('#settings-summary').textContent = t('settingsSummary', {size: boardSize, win: winLength});
+}
+
+function setSettingsExpanded(expanded) {
+  $('#settings-toggle').setAttribute('aria-expanded', String(expanded));
 }
 
 async function refreshCapabilities() {
@@ -154,7 +180,6 @@ function updatePreferenceControls() {
   button.setAttribute('aria-pressed', String(dark));
   button.setAttribute('aria-label', t(dark ? 'switchToLight' : 'switchToDark'));
   button.title = t(dark ? 'switchToLight' : 'switchToDark');
-  button.querySelector('.theme-icon').textContent = dark ? '☀' : '☾';
   label.dataset.i18n = dark ? 'lightTheme' : 'darkTheme';
   label.textContent = t(label.dataset.i18n);
   setCookie('tictactoe_lang', language);
@@ -176,6 +201,7 @@ async function loadLanguage(next) {
   }
   translateStaticContent();
   populateAgentSelectors();
+  updateSettingsSummary();
   updatePreferenceControls();
   refreshDynamicContent();
 }
@@ -215,21 +241,33 @@ function addWinningLine(segment) {
 }
 
 function render() {
+  const focusedCell = boardElement.contains(document.activeElement) ? document.activeElement : null;
+  if (focusedCell?.dataset.index) rovingCellIndex = Number(focusedCell.dataset.index);
   boardElement.innerHTML = '';
   const size = activeRules.boardSize;
+  rovingCellIndex = Math.min(rovingCellIndex, size * size - 1);
+  const gap = size === 9 ? 1 : size === 5 ? 2 : 3;
   boardElement.style.setProperty('--board-size', size);
-  boardElement.style.setProperty('--board-min-size', `${size * 43}px`);
-  boardElement.style.setProperty('--board-gap', `${Math.max(2, 9 - size)}px`);
-  boardElement.style.setProperty('--cell-radius', `${Math.max(5, 16 - size)}px`);
-  boardElement.style.setProperty('--mark-size', `${Math.max(1.15, 4.5 - size * 0.35)}rem`);
+  boardElement.style.setProperty('--board-min-size', `${size * 24 + (size - 1) * gap + 2}px`);
+  boardElement.style.setProperty('--board-gap', `${gap}px`);
+  boardElement.style.setProperty('--mark-size', size === 9
+    ? 'clamp(1.15rem, 4vw, 2.6rem)'
+    : size === 5 ? 'clamp(2.1rem, 6vw, 4rem)' : 'clamp(3rem, 8vw, 6rem)');
   board.flat().forEach((value, index) => {
     const cell = document.createElement('button');
     const row = Math.floor(index / size);
     const column = index % size;
+    const blocked = busy || finished || value !== 0 || mode === 'ai'
+      || (mode === 'human' && currentPlayer !== humanPlayer);
+    const isWinningCell = winningLine?.some(([lineRow, lineColumn]) => lineRow === row && lineColumn === column);
     cell.className = `cell ${value === 1 ? 'x' : value === -1 ? 'o' : ''}`;
     cell.textContent = value === 1 ? 'X' : value === -1 ? 'O' : '';
-    cell.ariaLabel = t('cell', {row: row + 1, column: column + 1});
-    cell.disabled = busy || finished || value !== 0 || mode === 'ai' || (mode === 'human' && currentPlayer !== humanPlayer);
+    cell.dataset.index = String(index);
+    cell.tabIndex = index === rovingCellIndex ? 0 : -1;
+    cell.setAttribute('aria-disabled', String(blocked));
+    cell.ariaLabel = t(value === 0 ? 'cellEmpty' : isWinningCell ? 'cellWinning' : 'cellOccupied', {
+      row: row + 1, column: column + 1, mark: value === 1 ? 'X' : 'O',
+    });
     cell.onclick = () => play(row, column);
     cell.onkeydown = event => {
       const deltas = {
@@ -243,10 +281,15 @@ function render() {
       event.preventDefault();
       const nextRow = Math.max(0, Math.min(size - 1, row + delta[0]));
       const nextColumn = Math.max(0, Math.min(size - 1, column + delta[1]));
-      boardElement.querySelectorAll('.cell')[nextRow * size + nextColumn].focus();
+      rovingCellIndex = nextRow * size + nextColumn;
+      cell.tabIndex = -1;
+      const nextCell = boardElement.querySelectorAll('.cell')[rovingCellIndex];
+      nextCell.tabIndex = 0;
+      nextCell.focus();
     };
     boardElement.appendChild(cell);
   });
+  if (focusedCell) boardElement.children[rovingCellIndex].focus({preventScroll: true});
   if (winningLine) addWinningLine(winningLine);
   let note;
   if (mode === 'ai') note = t('playsAs', {x: agentName($('#x-agent').value), o: agentName($('#o-agent').value)});
@@ -323,7 +366,8 @@ function finish() {
 }
 
 function play(row, column) {
-  if (busy || finished || board[row][column]) return;
+  if (busy || finished || board[row][column] || mode === 'ai'
+    || (mode === 'human' && currentPlayer !== humanPlayer)) return;
   board[row][column] = currentPlayer;
   currentPlayer *= -1;
   if (finish()) return;
@@ -423,6 +467,7 @@ function resetBoard() {
   busy = false;
   finished = false;
   winningLine = null;
+  rovingCellIndex = 0;
   render();
 }
 
@@ -736,14 +781,18 @@ function toggleReplay() {
 function setMode(next) {
   mode = next;
   document.querySelectorAll('.mode-tabs button').forEach(button => {
-    button.classList.toggle('active', button.dataset.mode === mode);
+    const active = button.dataset.mode === mode;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
   });
   const aiMode = mode === 'ai';
+  setSettingsExpanded(aiMode);
   document.querySelectorAll('.ai-field').forEach(field => {
     field.style.display = aiMode ? 'grid' : 'none';
   });
   $('#human-agent-field').style.display = mode === 'human' ? 'grid' : 'none';
   $('#start').textContent = t(aiMode ? 'runSeries' : 'newGame');
+  renderAgentAvailability();
   if (aiMode) {
     stopReplay();
     resetBoard();
@@ -766,6 +815,7 @@ async function rulesChanged(sizeChanged) {
   cancelActiveRequest();
   gameRevision++;
   if (sizeChanged) populateWinLengths(Math.min(Number($('#board-size').value), 5));
+  updateSettingsSummary();
   const loaded = await refreshCapabilities();
   if (mode === 'local') {
     start();
@@ -786,6 +836,9 @@ async function initialize() {
   document.documentElement.dataset.theme = theme;
   populateBoardSizes();
   populateWinLengths(3);
+  $('#settings-toggle').onclick = () => {
+    setSettingsExpanded($('#settings-toggle').getAttribute('aria-expanded') !== 'true');
+  };
   document.querySelectorAll('.mode-tabs button').forEach(button => {
     button.onclick = () => setMode(button.dataset.mode);
   });

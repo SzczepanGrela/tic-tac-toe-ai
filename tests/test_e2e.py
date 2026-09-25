@@ -43,6 +43,91 @@ def test_nine_by_nine_local_game_detects_an_off_center_win(page, live_server_url
     expect(page.locator(".winning-line.row-1")).to_be_visible()
 
 
+@pytest.mark.parametrize("width", [320, 375])
+def test_nine_by_nine_board_fits_a_phone_and_settings_can_collapse(page, live_server_url, width):
+    page.set_viewport_size({"width": width, "height": 800})
+    page.goto(live_server_url)
+    page.get_by_role("button", name="Local players").click()
+
+    toggle = page.locator("#settings-toggle")
+    expect(toggle).to_have_attribute("aria-expanded", "false")
+    expect(page.locator("#board-size")).to_be_hidden()
+    toggle.click()
+    page.locator("#board-size").select_option("9")
+    expect(page.locator(".cell")).to_have_count(81)
+    toggle.click()
+    expect(page.locator("#board-size")).to_be_hidden()
+    expect(page.locator("#algorithm-note")).to_be_visible()
+
+    dimensions = page.evaluate("""() => {
+        const board = document.querySelector('#board');
+        const viewport = document.querySelector('.board-scroll');
+        const cell = document.querySelector('.cell');
+        return {
+            pageWidth: document.documentElement.scrollWidth,
+            boardWidth: board.getBoundingClientRect().width,
+            viewportWidth: viewport.getBoundingClientRect().width,
+            cellWidth: cell.getBoundingClientRect().width,
+        };
+    }""")
+    assert dimensions["pageWidth"] <= width
+    assert dimensions["boardWidth"] <= dimensions["viewportWidth"]
+    assert dimensions["cellWidth"] >= 24
+
+
+def test_narrow_zoom_scrolls_only_the_board_without_shrinking_cells(page, live_server_url):
+    page.set_viewport_size({"width": 220, "height": 800})
+    page.goto(live_server_url)
+    page.get_by_role("button", name="Local players").click()
+    page.locator("#settings-toggle").click()
+    page.locator("#board-size").select_option("9")
+    expect(page.locator(".cell")).to_have_count(81)
+
+    dimensions = page.evaluate("""() => ({
+        pageWidth: document.documentElement.scrollWidth,
+        boardWidth: document.querySelector('#board').getBoundingClientRect().width,
+        viewportWidth: document.querySelector('.board-scroll').getBoundingClientRect().width,
+        cellWidth: document.querySelector('.cell').getBoundingClientRect().width,
+    })""")
+    assert dimensions["pageWidth"] <= 220
+    assert dimensions["boardWidth"] > dimensions["viewportWidth"]
+    assert dimensions["cellWidth"] >= 24
+
+
+def test_board_keyboard_navigation_retains_focus_after_a_move(page, live_server_url):
+    page.goto(live_server_url)
+    page.get_by_role("button", name="Local players").click()
+    cells = page.locator(".cell")
+    cells.first.focus()
+    page.keyboard.press("ArrowRight")
+    expect(cells.nth(1)).to_be_focused()
+    page.keyboard.press("Enter")
+    expect(cells.nth(1)).to_be_focused()
+    expect(cells.nth(1)).to_have_attribute("aria-label", "Row 1, column 2: X")
+    page.keyboard.press("ArrowLeft")
+    expect(cells.first).to_be_focused()
+    page.keyboard.press("Enter")
+    expect(cells.first).to_have_text("O")
+
+
+def test_phone_opens_series_settings_and_explains_unavailable_agents(page, live_server_url):
+    page.set_viewport_size({"width": 375, "height": 800})
+    page.goto(live_server_url)
+    toggle = page.locator("#settings-toggle")
+    expect(toggle).to_have_attribute("aria-expanded", "false")
+
+    page.get_by_role("button", name="AI vs AI").click()
+    expect(toggle).to_have_attribute("aria-expanded", "true")
+    expect(page.locator("#x-agent")).to_be_visible()
+    page.locator("#board-size").select_option("5")
+    availability = page.locator("#agent-availability")
+    expect(availability).to_be_visible()
+    availability.locator("summary").click()
+    expect(page.locator("#unavailable-agents")).to_contain_text(
+        "DQN: Available only for classic 3×3."
+    )
+
+
 def test_larger_board_disables_classic_only_agents(page, live_server_url):
     page.goto(live_server_url)
     expect(page.locator("#board-size option")).to_have_count(3)
