@@ -206,40 +206,6 @@ async function loadLanguage(next) {
   refreshDynamicContent();
 }
 
-function winningClass(segment) {
-  const [start, end] = [segment[0], segment[segment.length - 1]];
-  if (start[0] === end[0]) return `row-${start[0]}`;
-  if (start[1] === end[1]) return `column-${start[1]}`;
-  return end[1] > start[1] ? 'diagonal-down' : 'diagonal-up';
-}
-
-function addWinningLine(segment) {
-  const namespace = 'http://www.w3.org/2000/svg';
-  const overlay = document.createElementNS(namespace, 'svg');
-  const line = document.createElementNS(namespace, 'polygon');
-  const start = {x: segment[0][1] + 0.5, y: segment[0][0] + 0.5};
-  const last = segment[segment.length - 1];
-  const end = {x: last[1] + 0.5, y: last[0] + 0.5};
-  const length = Math.hypot(end.x - start.x, end.y - start.y);
-  const offset = {
-    x: -((end.y - start.y) / length) * 0.07,
-    y: ((end.x - start.x) / length) * 0.07,
-  };
-  overlay.classList.add('winning-overlay');
-  overlay.setAttribute('viewBox', `0 0 ${activeRules.boardSize} ${activeRules.boardSize}`);
-  overlay.setAttribute('preserveAspectRatio', 'none');
-  overlay.setAttribute('aria-hidden', 'true');
-  line.classList.add('winning-line', winningClass(segment));
-  line.setAttribute('points', [
-    `${start.x + offset.x},${start.y + offset.y}`,
-    `${end.x + offset.x},${end.y + offset.y}`,
-    `${end.x - offset.x},${end.y - offset.y}`,
-    `${start.x - offset.x},${start.y - offset.y}`,
-  ].join(' '));
-  overlay.appendChild(line);
-  boardElement.appendChild(overlay);
-}
-
 function render() {
   const focusedCell = boardElement.contains(document.activeElement) ? document.activeElement : null;
   if (focusedCell?.dataset.index) rovingCellIndex = Number(focusedCell.dataset.index);
@@ -260,7 +226,7 @@ function render() {
     const blocked = busy || finished || value !== 0 || mode === 'ai'
       || (mode === 'human' && currentPlayer !== humanPlayer);
     const isWinningCell = winningLine?.some(([lineRow, lineColumn]) => lineRow === row && lineColumn === column);
-    cell.className = `cell ${value === 1 ? 'x' : value === -1 ? 'o' : ''}`;
+    cell.className = `cell ${value === 1 ? 'x' : value === -1 ? 'o' : ''}${isWinningCell ? ' winning' : ''}`;
     cell.textContent = value === 1 ? 'X' : value === -1 ? 'O' : '';
     cell.dataset.index = String(index);
     cell.tabIndex = index === rovingCellIndex ? 0 : -1;
@@ -290,7 +256,6 @@ function render() {
     boardElement.appendChild(cell);
   });
   if (focusedCell) boardElement.children[rovingCellIndex].focus({preventScroll: true});
-  if (winningLine) addWinningLine(winningLine);
   let note;
   if (mode === 'ai') note = t('playsAs', {x: agentName($('#x-agent').value), o: agentName($('#o-agent').value)});
   else if (mode === 'local') note = t('twoPlayers');
@@ -304,19 +269,35 @@ function render() {
   noteElement.textContent = note;
 }
 
-function updateSeriesMeta() {
-  if (!replay) return;
-  const count = replay.data.games.length;
+function updateSeriesMeta(data, count = data.games.length) {
   $('#series-meta').textContent = t('seriesMeta', {
-    seed: replay.data.seed,
+    seed: data.seed,
     count,
     games: t(count === 1 ? 'gameCountOne' : 'gameCountMany'),
-    size: replay.data.board_size || 3,
-    win: replay.data.win_length || 3,
+    size: data.board_size || 3,
+    win: data.win_length || 3,
   });
-  if (Object.values(replay.data.agent_profiles || {}).some(profile => profile.seed_reproducible === false)) {
+  if (Object.values(data.agent_profiles || {}).some(profile => profile.seed_reproducible === false)) {
     $('#series-meta').textContent += ` · ${t('remoteSeedNote')}`;
   }
+}
+
+function updateScoreboard(summary) {
+  $('#x-wins').textContent = summary.x_wins;
+  $('#o-wins').textContent = summary.o_wins;
+  $('#draws').textContent = summary.draws;
+}
+
+function scoreThroughReplay() {
+  if (!replay) return;
+  const completed = replay.game + Number(replay.move >= replay.data.games[replay.game].moves.length);
+  const summary = {x_wins: 0, o_wins: 0, draws: 0};
+  for (const game of replay.data.games.slice(0, completed)) {
+    if (game.winner === 1) summary.x_wins++;
+    else if (game.winner === -1) summary.o_wins++;
+    else summary.draws++;
+  }
+  updateScoreboard(summary);
 }
 
 function refreshDynamicContent() {
@@ -326,7 +307,9 @@ function refreshDynamicContent() {
   if (replay) {
     const complete = replay.game === replay.data.games.length - 1 && replay.move >= replay.data.games[replay.game].moves.length;
     $('#pause').textContent = t(complete ? 'replay' : replay.playing ? 'pause' : 'resume');
-    updateSeriesMeta();
+    updateSeriesMeta(replay.data);
+  } else if (seriesCalculation?.data) {
+    updateSeriesMeta(seriesCalculation.data);
   }
   render();
 }
@@ -517,11 +500,15 @@ function replayAgentProfiles() {
 
 function waitWithSignal(milliseconds, signal) {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, milliseconds);
-    signal.addEventListener('abort', () => {
+    const abort = () => {
       clearTimeout(timer);
       reject(new DOMException('Aborted', 'AbortError'));
-    }, {once: true});
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', abort);
+      resolve();
+    }, milliseconds);
+    signal.addEventListener('abort', abort, {once: true});
   });
 }
 
@@ -570,8 +557,8 @@ async function incrementalMove(position, algorithm, seed, controller, revision) 
   }
 }
 
-async function calculateIncrementalSeries(count, seed, controller, revision) {
-  const data = {
+function newSeriesData(seed) {
+  return {
     seed,
     x_algorithm: $('#x-agent').value,
     o_algorithm: $('#o-agent').value,
@@ -582,52 +569,149 @@ async function calculateIncrementalSeries(count, seed, controller, revision) {
     games: [],
     summary: {x_wins: 0, o_wins: 0, draws: 0},
   };
-  seriesCalculation.data = data;
+}
+
+function startLiveSeries(data) {
+  updateScoreboard(data.summary);
+  updateSeriesMeta(data);
+  $('#scoreboard').classList.remove('hidden');
+  $('#replay-controls').classList.add('calculating');
+  $('#replay-controls').classList.remove('hidden');
+  $('#pause').textContent = t('pause');
+  $('#stop-series').classList.remove('hidden');
+}
+
+function recordGame(data, game) {
+  data.games.push(game);
+  if (game.winner === 1) data.summary.x_wins++;
+  else if (game.winner === -1) data.summary.o_wins++;
+  else data.summary.draws++;
+  updateScoreboard(data.summary);
+  updateSeriesMeta(data);
+}
+
+function showLiveGame(game, data, total) {
+  board = Array.from({length: activeRules.boardSize}, () => Array(activeRules.boardSize).fill(0));
+  for (const move of game.moves) board[move.row][move.column] = move.player;
+  winningLine = result().line;
+  setStatus('gameFinished', {
+    current: game.game, total,
+    x: data.summary.x_wins, o: data.summary.o_wins, draws: data.summary.draws,
+  });
+  render();
+}
+
+async function* jsonLines(response) {
+  if (!response.body) throw new Error('stream body unavailable');
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, {stream: true});
+      let end;
+      while ((end = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, end);
+        buffer = buffer.slice(end + 1);
+        if (line.trim()) yield JSON.parse(line);
+      }
+    }
+    if (buffer.trim()) throw new Error('incomplete stream response');
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+async function calculateStreamingSeries(count, data, controller, revision) {
+  const response = await fetch('/api/matches/stream', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    signal: controller.signal,
+    body: JSON.stringify({
+      x_algorithm: data.x_algorithm,
+      o_algorithm: data.o_algorithm,
+      games: count,
+      seed: data.seed,
+    }),
+  });
+  if (response.status === 429) {
+    const error = new Error('series rate limited');
+    error.retryAfter = response.headers.get('Retry-After') || 1;
+    throw error;
+  }
+  if (!response.ok) throw new Error(`series HTTP ${response.status}`);
+  let complete = false;
+  for await (const event of jsonLines(response)) {
+    if (revision !== gameRevision || mode !== 'ai') throw new DOMException('Aborted', 'AbortError');
+    if (event.type === 'error') throw responseError({detail: event.detail});
+    if (event.type === 'complete') {
+      complete = true;
+      break;
+    }
+    if (event.type !== 'game' || event.game?.game !== data.games.length + 1) {
+      throw new Error('invalid series stream');
+    }
+    await waitForSeriesTurn(controller.signal);
+    recordGame(data, event.game);
+    showLiveGame(event.game, data, count);
+    if (data.games.length < count) await waitWithSignal(Number($('#speed').value), controller.signal);
+  }
+  if (!complete || data.games.length !== count) throw new Error('incomplete series stream');
+  return data;
+}
+
+async function calculateIncrementalSeries(count, data, controller, revision) {
   for (let game = 0; game < count; game++) {
     const position = Array.from({length: activeRules.boardSize}, () => Array(activeRules.boardSize).fill(0));
+    board = position.map(row => row.slice());
+    winningLine = null;
+    setStatus('gameProgress', {current: game + 1, total: count});
+    render();
     const moves = [];
     data.interrupted_game = {game: game + 1, moves, board_size: activeRules.boardSize, win_length: activeRules.winLength};
     let player = 1;
     while (result(position).winner === null) {
       await waitForSeriesTurn(controller.signal);
       const algorithm = player === 1 ? data.x_algorithm : data.o_algorithm;
-      const response = await incrementalMove(position, algorithm, deriveSeed(seed, game, moves.length), controller, revision);
+      const response = await incrementalMove(position, algorithm, deriveSeed(data.seed, game, moves.length), controller, revision);
       const move = response.move;
       if (!isLegalReturnedMove(position, move, player)) throw new Error('illegal move response');
       position[move.row][move.column] = player;
       moves.push({row: move.row, column: move.column, player, metadata: response.metadata || null});
       player *= -1;
+      board = position.map(row => row.slice());
       if (seriesCalculation?.paused) setStatus('seriesPaused');
       else setStatus('moveProgress', {current: game + 1, total: count, move: moves.length});
+      render();
     }
     const winner = result(position).winner;
-    if (winner === 1) data.summary.x_wins++;
-    else if (winner === -1) data.summary.o_wins++;
-    else data.summary.draws++;
-    data.games.push({
+    const trace = {
       game: game + 1,
       winner,
       moves,
       board_size: activeRules.boardSize,
       win_length: activeRules.winLength,
-    });
+    };
+    recordGame(data, trace);
+    showLiveGame(trace, data, count);
     delete data.interrupted_game;
+    if (game + 1 < count) await waitWithSignal(Number($('#speed').value), controller.signal);
   }
   return data;
 }
 
-function showSeries(data, playing) {
-  if (!data?.games.length) return;
-  replay = {data, game: 0, move: 0, playing};
-  $('#x-wins').textContent = data.summary.x_wins;
-  $('#o-wins').textContent = data.summary.o_wins;
-  $('#draws').textContent = data.summary.draws;
-  updateSeriesMeta();
-  $('#scoreboard').classList.remove('hidden');
+function finishLiveSeries(data, total = data.games.length) {
+  const last = data.games.length - 1;
+  replay = {data, game: last, move: data.games[last].moves.length, playing: false};
+  showLiveGame(data.games[last], data, total);
   $('#replay-controls').classList.remove('hidden', 'calculating');
-  $('#pause').textContent = t(playing ? 'pause' : 'replay');
-  loadReplayGame();
-  if (playing) scheduleReplay();
+  $('#pause').textContent = t('replay');
+  setStatus('seriesCompleteSummary', {
+    x: data.summary.x_wins, o: data.summary.o_wins, draws: data.summary.draws,
+  });
+  render();
 }
 
 async function newAiSeries() {
@@ -643,55 +727,36 @@ async function newAiSeries() {
   try {
     const count = Number($('#series-count').value);
     const seed = seriesSeed();
-    let data;
+    const data = newSeriesData(seed);
     const agents = [$('#x-agent').value, $('#o-agent').value];
-    if (activeRules.boardSize === 3 && activeRules.winLength === 3
-        && agents.every(id => capabilities.get(id)?.series_mode !== 'incremental')) {
-      const response = await fetch('/api/matches', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        signal: controller.signal,
-        body: JSON.stringify({
-          x_algorithm: $('#x-agent').value,
-          o_algorithm: $('#o-agent').value,
-          games: count,
-          seed,
-        }),
-      });
-      data = await response.json();
-      if (response.status === 429) {
-        busy = false;
-        setStatus('seriesRateLimited', {seconds: response.headers.get('Retry-After') || 1});
-        render();
-        return;
-      }
-      if (!response.ok) throw new Error();
-      data.server_revision = capabilityReleaseRevision;
-      data.agent_profiles = replayAgentProfiles();
-    } else {
-      seriesCalculation = {paused: false, steps: 0, wake: null};
-      $('#replay-controls').classList.add('calculating');
-      $('#replay-controls').classList.remove('hidden');
-      $('#pause').textContent = t('pause');
-      $('#stop-series').classList.remove('hidden');
-      data = await calculateIncrementalSeries(count, seed, controller, revision);
-    }
+    const incremental = activeRules.boardSize !== 3 || activeRules.winLength !== 3
+      || agents.some(id => capabilities.get(id)?.series_mode === 'incremental');
+    seriesCalculation = {paused: false, steps: 0, wake: null, data, count};
+    startLiveSeries(data);
+    if (incremental) await calculateIncrementalSeries(count, data, controller, revision);
+    else await calculateStreamingSeries(count, data, controller, revision);
     if (revision !== gameRevision || mode !== 'ai') return;
     seriesCalculation = null;
     busy = false;
-    showSeries(data, true);
+    finishLiveSeries(data);
   } catch (error) {
     if (revision !== gameRevision || mode !== 'ai') return;
     const stopped = seriesCalculation?.stopRequested;
     if (error.name === 'AbortError' && !stopped) return;
     const partial = seriesCalculation?.data;
+    const total = seriesCalculation?.count;
     busy = false;
     finished = true;
     seriesCalculation = null;
-    $('#replay-controls').classList.add('hidden');
-    $('#replay-controls').classList.remove('calculating');
-    showSeries(partial, false);
-    setStatus(stopped ? 'seriesStopped' : providerErrorKey(error, 'seriesError'));
+    if (partial?.games.length) finishLiveSeries(partial, total);
+    else {
+      $('#replay-controls').classList.add('hidden');
+      $('#replay-controls').classList.remove('calculating');
+      $('#scoreboard').classList.add('hidden');
+    }
+    setStatus(stopped ? 'seriesStopped' : error.retryAfter
+      ? 'seriesRateLimited' : providerErrorKey(error, 'seriesError'),
+    error.retryAfter ? {seconds: error.retryAfter} : {});
     render();
   } finally {
     if (activeController === controller) {
@@ -711,6 +776,7 @@ function loadReplayGame() {
   winningLine = null;
   replay.move = 0;
   setStatus('gameProgress', {current: replay.game + 1, total: replay.data.games.length});
+  scoreThroughReplay();
   render();
 }
 
@@ -722,6 +788,7 @@ function advanceReplay(schedule = true) {
     board[move.row][move.column] = move.player;
     if (replay.move === game.moves.length) winningLine = result().line;
     setStatus('moveProgress', {current: replay.game + 1, total: replay.data.games.length, move: replay.move});
+    scoreThroughReplay();
     render();
   } else if (replay.game + 1 < replay.data.games.length) {
     replay.game++;

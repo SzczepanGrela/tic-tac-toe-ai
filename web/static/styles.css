@@ -40,6 +40,7 @@
   --board-line: #789294;
   --board-hover: #e5efec;
   --win: #4c8077;
+  --win-bg: #dcebe6;
   --focus: #086c8a;
 }
 
@@ -61,6 +62,7 @@
   --board-line: #637d80;
   --board-hover: #304447;
   --win: #abcfb0;
+  --win-bg: #315048;
   --focus: #a5d8e5;
 }
 
@@ -105,6 +107,7 @@ h1 {
   letter-spacing: .015em;
 }
 .lede { max-width: 64ch; margin: 9px 0 0; color: var(--muted); }
+@media (max-width: 900px) { .lede { min-height: 3em; } }
 
 .preferences { display: flex; flex: none; gap: 8px; align-items: center; }
 .language-switch { display: flex; border: 1px solid var(--line-strong); background: var(--paper); }
@@ -250,9 +253,7 @@ h1 {
 .cell:focus-visible { z-index: 1; outline-offset: -4px; }
 .cell.x { color: var(--x); }
 .cell.o { color: var(--o); }
-.winning-overlay { position: absolute; inset: 0; z-index: 2; width: 100%; height: 100%; pointer-events: none; }
-.winning-line { fill: var(--win); animation: reveal-winning-line .35s ease-out both; transform-box: fill-box; transform-origin: center; }
-@keyframes reveal-winning-line { from { opacity: 0; scale: 0 1; } to { opacity: 1; scale: 1 1; } }
+.cell.winning { background: var(--win-bg); box-shadow: inset 0 0 0 2px var(--win); }
 
 .game-actions { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin-top: 16px; }
 .game-actions button, .replay-controls select {
@@ -282,7 +283,7 @@ h1 {
 }
 .scoreboard div { display: grid; align-content: center; justify-items: center; min-width: 0; min-height: 68px; padding: 7px; text-align: center; }
 .scoreboard div + div { border-left: 1px solid var(--line); }
-.scoreboard strong { font: 600 2rem/1 "Barlow Condensed", "Arial Narrow", sans-serif; }
+.scoreboard strong { font: 600 2rem/1 "Barlow Condensed", "Arial Narrow", sans-serif; font-variant-numeric: tabular-nums; }
 .scoreboard span { color: var(--muted); font-size: .78rem; }
 .scoreboard p { grid-column: 1 / -1; margin: 0; padding: 7px 10px; border-top: 1px solid var(--line); color: var(--muted); font-size: .8rem; text-align: center; }
 .hidden { display: none !important; }

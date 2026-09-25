@@ -17,12 +17,13 @@ def test_initial_view_contains_only_human_vs_ai_controls(page, live_server_url):
         expect(field).to_be_hidden()
 
 
-def test_winning_line_appears_for_completed_game(page, live_server_url):
+def test_winning_cells_are_highlighted_without_a_strike_through(page, live_server_url):
     page.goto(live_server_url)
     page.get_by_role("button", name="Local players").click()
     for index in (0, 3, 1, 4, 2):
         page.locator(".cell").nth(index).click()
-    expect(page.locator(".winning-line.row-0")).to_be_visible()
+    expect(page.locator(".cell.winning")).to_have_count(3)
+    expect(page.locator(".winning-overlay")).to_have_count(0)
 
 
 def test_nine_by_nine_local_game_detects_an_off_center_win(page, live_server_url):
@@ -40,7 +41,7 @@ def test_nine_by_nine_local_game_detects_an_off_center_win(page, live_server_url
         page.locator(".cell").nth(index).click()
 
     expect(page.get_by_role("status")).to_have_text("Player X wins!")
-    expect(page.locator(".winning-line.row-1")).to_be_visible()
+    expect(page.locator(".cell.winning")).to_have_count(5)
 
 
 @pytest.mark.parametrize("width", [320, 375])
@@ -172,10 +173,80 @@ def test_ai_vs_ai_replay_controls(page, live_server_url):
     page.locator("#series-count").select_option("3")
     page.locator("#seed").fill("42")
     page.get_by_role("button", name="Run series").click()
-    page.locator("#scoreboard:not(.hidden)").wait_for()
+    expect(page.get_by_role("status")).to_contain_text("Series complete")
     expect(page.locator("#series-meta")).to_contain_text("Seed 42")
-    page.get_by_role("button", name="Pause").click()
+    page.get_by_role("button", name="Replay").click()
     page.get_by_role("button", name="Step").click()
+
+
+def test_streamed_games_update_board_and_score_before_series_finishes(page, live_server_url):
+    page.add_init_script("""
+        const nativeFetch = window.fetch.bind(window);
+        window.fetch = (url, options) => {
+            if (url !== '/api/matches/stream') return nativeFetch(url, options);
+            return Promise.resolve(new Response(new ReadableStream({
+                start(controller) {
+                    window.streamController = controller;
+                    window.pushGame = game => {
+                        const bytes = new TextEncoder().encode(JSON.stringify({type: 'game', game}) + '\\n');
+                        controller.enqueue(bytes.slice(0, 7));
+                        controller.enqueue(bytes.slice(7));
+                    };
+                    window.finishStream = () => {
+                        controller.enqueue(new TextEncoder().encode('{"type":"complete"}\\n'));
+                        controller.close();
+                    };
+                },
+            }), {status: 200, headers: {'Content-Type': 'application/x-ndjson'}}));
+        };
+    """)
+    page.goto(live_server_url)
+    page.get_by_role("button", name="AI vs AI").click()
+    page.locator("#series-count").select_option("3")
+    page.evaluate("document.querySelector('#speed').value = '125'")
+    page.get_by_role("button", name="Run series").click()
+    expect(page.locator("#scoreboard")).to_be_visible()
+    expect(page.locator("#x-wins")).to_have_text("0")
+    page.wait_for_function("Boolean(window.pushGame)")
+
+    first = {"game": 1, "winner": 1, "board_size": 3, "win_length": 3,
+             "moves": [{"row": i // 3, "column": i % 3, "player": 1 if turn % 2 == 0 else -1}
+                       for turn, i in enumerate((0, 3, 1, 4, 2))]}
+    second = {"game": 2, "winner": -1, "board_size": 3, "win_length": 3,
+              "moves": [{"row": i // 3, "column": i % 3, "player": 1 if turn % 2 == 0 else -1}
+                        for turn, i in enumerate((0, 3, 1, 4, 8, 5))]}
+    page.evaluate("game => window.pushGame(game)", first)
+    expect(page.locator("#x-wins")).to_have_text("1")
+    expect(page.locator("#o-wins")).to_have_text("0")
+    expect(page.locator(".cell.winning")).to_have_count(3)
+    expect(page.get_by_role("status")).to_contain_text("Game 1/3 complete")
+
+    page.evaluate("game => window.pushGame(game)", second)
+    expect(page.locator("#o-wins")).to_have_text("1")
+    expect(page.get_by_role("status")).to_contain_text("Game 2/3 complete")
+    page.evaluate("game => window.pushGame(game)", {**first, "game": 3})
+    expect(page.locator("#x-wins")).to_have_text("2")
+    page.evaluate("() => window.finishStream()")
+    expect(page.get_by_role("status")).to_contain_text("Series complete")
+    expect(page.locator("#x-wins")).to_have_text("2")
+    expect(page.locator("#o-wins")).to_have_text("1")
+    page.get_by_role("button", name="Replay").click()
+    expect(page.locator("#x-wins")).to_have_text("0")
+    expect(page.locator("#o-wins")).to_have_text("0")
+    for _ in range(5):
+        page.get_by_role("button", name="Step", exact=True).click()
+    expect(page.locator("#x-wins")).to_have_text("1")
+    expect(page.locator("#o-wins")).to_have_text("0")
+
+
+@pytest.mark.parametrize("width", [320, 375, 700, 820, 980])
+def test_language_switch_keeps_game_panel_in_place(page, live_server_url, width):
+    page.set_viewport_size({"width": width, "height": 800})
+    page.goto(live_server_url)
+    initial_top = page.locator(".lab-card").bounding_box()["y"]
+    page.get_by_role("button", name="PL", exact=True).click()
+    expect(page.locator("html")).to_have_attribute("lang", "pl")
+    assert abs(page.locator(".lab-card").bounding_box()["y"] - initial_top) < 1
 
 
 def test_larger_ai_series_uses_incremental_moves_and_replays(page, live_server_url):
@@ -209,7 +280,7 @@ def test_larger_ai_series_uses_incremental_moves_and_replays(page, live_server_u
     page.locator("#seed").fill("123")
     page.get_by_role("button", name="Run series").click()
 
-    page.locator("#scoreboard:not(.hidden)").wait_for()
+    expect(page.get_by_role("status")).to_contain_text("Series complete")
     expect(page.locator("#series-meta")).to_contain_text("5×5, 5 in a row")
     expect(page.locator(".cell")).to_have_count(25)
     assert requests
@@ -249,6 +320,7 @@ def test_larger_series_pause_and_step_control_move_requests(page, live_server_ur
     page.get_by_role("button", name="Run series").click()
 
     page.wait_for_function("window.moveRequests >= 1")
+    expect(page.locator(".cell.x")).to_have_count(1)
     page.get_by_role("button", name="Pause").click()
     requests_at_pause = page.evaluate("window.moveRequests")
     page.wait_for_timeout(180)
@@ -273,7 +345,7 @@ def test_ai_vs_ai_displays_non_draw_score(page, live_server_url):
     page.locator("#seed").fill("42")
     page.get_by_role("button", name="Run series").click()
 
-    page.locator("#scoreboard:not(.hidden)").wait_for()
+    expect(page.get_by_role("status")).to_contain_text("Series complete")
     expect(page.locator("#x-wins")).to_have_text("0")
     expect(page.locator("#o-wins")).to_have_text("9")
     expect(page.locator("#draws")).to_have_text("1")
@@ -373,6 +445,7 @@ def test_jev_classic_series_is_incremental_and_preserves_completed_games(page, l
     if ending == "stop":
         page.wait_for_function("window.moveRequests === 8")
         page.locator("#stop-series").click()
+    page.wait_for_function("Boolean(replay)")
     expect(page.locator("#scoreboard")).to_be_visible()
     assert page.evaluate("window.batchRequests") == 0
     expect(page.locator("#x-wins")).to_have_text("3" if ending == "complete" else "1")
@@ -383,5 +456,6 @@ def test_jev_classic_series_is_incremental_and_preserves_completed_games(page, l
         assert page.evaluate("replay.data.games.length") == 1
         assert page.evaluate("replay.data.interrupted_game.game") == 2
         expect(page.locator("#stop-series")).to_be_hidden()
+        page.get_by_role("button", name="Replay").click()
         page.get_by_role("button", name="Step", exact=True).click()
         expect(page.locator(".cell.x")).to_have_count(1)
