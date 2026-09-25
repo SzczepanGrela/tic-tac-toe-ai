@@ -25,6 +25,9 @@ STATIC_ASSETS = {
     "app.js": ("application/javascript", (STATIC_DIR / "app.js").read_bytes()),
     "favicon.svg": ("image/svg+xml", (STATIC_DIR / "favicon.svg").read_bytes()),
     "styles.css": ("text/css", (STATIC_DIR / "styles.css").read_bytes()),
+    "AtkinsonHyperlegible-Regular.woff2": ("font/woff2", (STATIC_DIR / "AtkinsonHyperlegible-Regular.woff2").read_bytes()),
+    "AtkinsonHyperlegible-Bold.woff2": ("font/woff2", (STATIC_DIR / "AtkinsonHyperlegible-Bold.woff2").read_bytes()),
+    "BarlowCondensed-SemiBold.ttf": ("font/ttf", (STATIC_DIR / "BarlowCondensed-SemiBold.ttf").read_bytes()),
 }
 LOCALE_ASSETS = {
     language: (STATIC_DIR / "locales" / f"{language}.json").read_bytes()
