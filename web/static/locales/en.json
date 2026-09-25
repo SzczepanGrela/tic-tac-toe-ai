@@ -59,6 +59,7 @@
   "gameCountOne": "game",
   "gameCountMany": "games",
   "gameProgress": "Game {current}/{total}",
+  "gameFinished": "Game {current}/{total} complete · X {x}, draws {draws}, O {o}",
   "moveProgress": "Game {current}/{total} · move {move}",
   "seriesComplete": "Series complete",
   "seriesCompleteSummary": "Series complete · X {x} : {o} O · {draws} draws",

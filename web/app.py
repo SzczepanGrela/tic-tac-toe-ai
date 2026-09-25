@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 import os
 import random
@@ -14,7 +15,7 @@ from typing import TypeVar
 from ai.execution import SearchBudget, SearchStopped, check_search, current_budget
 from ai.jev import JevError, JevService
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, StrictInt, model_validator
 
 from ai.registry import AgentId, AgentRegistry
@@ -409,45 +410,60 @@ async def calculate_move(payload: MoveRequest, request: Request) -> MoveResponse
     )
 
 
-def _simulate_matches(payload: MatchRequest, registry: AgentRegistry, seed: int) -> MatchResponse:
+def _simulate_match_game(payload: MatchRequest, registry: AgentRegistry,
+                         rng: random.Random, game_number: int) -> GameTrace:
     rules = payload.game_rules()
+    state = GameState(rules=rules)
+    moves = []
+    while not state.is_game_over():
+        check_search()
+        agent_id = payload.x_algorithm if state.current_player == 1 else payload.o_algorithm
+        player = state.current_player
+        move = _select_move(registry, agent_id, state, rng)
+        state.make_move_assuming_active(*move)
+        moves.append(Move(row=move[0], column=move[1], player=player))
+    return GameTrace(
+        game=game_number,
+        winner=int(state.get_winner()),
+        moves=moves,
+        board_size=rules.board_size,
+        win_length=rules.win_length,
+    )
+
+
+def _simulate_matches(payload: MatchRequest, registry: AgentRegistry, seed: int) -> MatchResponse:
     rng = random.Random(seed)
-    traces = []
-    x_wins = o_wins = draws = 0
-    for game_number in range(1, payload.games + 1):
-        state = GameState(rules=rules)
-        moves = []
-        while not state.is_game_over():
-            check_search()
-            agent_id = payload.x_algorithm if state.current_player == 1 else payload.o_algorithm
-            player = state.current_player
-            move = _select_move(registry, agent_id, state, rng)
-            state.make_move_assuming_active(*move)
-            moves.append(Move(row=move[0], column=move[1], player=player))
-        winner = int(state.get_winner())
-        x_wins += winner == 1
-        o_wins += winner == -1
-        draws += winner == 0
-        traces.append(GameTrace(
-            game=game_number,
-            winner=winner,
-            moves=moves,
-            board_size=rules.board_size,
-            win_length=rules.win_length,
-        ))
+    traces = [_simulate_match_game(payload, registry, rng, game_number)
+              for game_number in range(1, payload.games + 1)]
     return MatchResponse(
         seed=seed,
         x_algorithm=payload.x_algorithm,
         o_algorithm=payload.o_algorithm,
-        board_size=rules.board_size,
-        win_length=rules.win_length,
+        board_size=payload.game_rules().board_size,
+        win_length=payload.game_rules().win_length,
         games=traces,
-        summary=MatchSummary(x_wins=x_wins, o_wins=o_wins, draws=draws),
+        summary=MatchSummary(
+            x_wins=sum(trace.winner == 1 for trace in traces),
+            o_wins=sum(trace.winner == -1 for trace in traces),
+            draws=sum(trace.winner == 0 for trace in traces),
+        ),
     )
 
 
 @app.post("/api/matches", response_model=MatchResponse)
 async def calculate_matches(payload: MatchRequest, request: Request) -> MatchResponse:
+    seed = await _prepare_matches(payload, request)
+    return await _while_connected(request, _run_ai_work(
+        request,
+        _simulate_matches,
+        payload,
+        request.app.state.registry,
+        seed,
+        timeout_seconds=AI_MATCH_TIMEOUT_SECONDS,
+    ))
+
+
+async def _prepare_matches(payload: MatchRequest, request: Request) -> int:
     rules = payload.game_rules()
     if AgentId.jev in (payload.x_algorithm, payload.o_algorithm):
         raise HTTPException(status_code=422, detail="Jev series must use the incremental move endpoint")
@@ -466,12 +482,30 @@ async def calculate_matches(payload: MatchRequest, request: Request) -> MatchRes
             detail="Match-series rate limit exceeded",
             headers={"Retry-After": str(retry_after)},
         )
-    seed = payload.seed if payload.seed is not None else secrets.randbits(32)
-    return await _while_connected(request, _run_ai_work(
-        request,
-        _simulate_matches,
-        payload,
-        request.app.state.registry,
-        seed,
-        timeout_seconds=AI_MATCH_TIMEOUT_SECONDS,
-    ))
+    return payload.seed if payload.seed is not None else secrets.randbits(32)
+
+
+@app.post("/api/matches/stream")
+async def stream_matches(payload: MatchRequest, request: Request) -> StreamingResponse:
+    seed = await _prepare_matches(payload, request)
+    registry = request.app.state.registry
+
+    async def events():
+        rng = random.Random(seed)
+        deadline = time.monotonic() + AI_MATCH_TIMEOUT_SECONDS
+        for game_number in range(1, payload.games + 1):
+            try:
+                trace = await _run_ai_work(
+                    request, _simulate_match_game, payload, registry, rng, game_number,
+                    timeout_seconds=max(0.001, deadline - time.monotonic()),
+                )
+            except HTTPException as exc:
+                yield json.dumps({"type": "error", "detail": exc.detail}) + "\n"
+                return
+            yield json.dumps({"type": "game", "game": trace.model_dump()}) + "\n"
+        yield '{"type":"complete"}\n'
+
+    return StreamingResponse(events(), media_type="application/x-ndjson", headers={
+        "Cache-Control": "no-cache, no-transform",
+        "X-Accel-Buffering": "no",
+    })

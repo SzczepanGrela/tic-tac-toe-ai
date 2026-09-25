@@ -20,7 +20,7 @@ The trained agents are pure policies: no hidden win/block heuristic is applied d
 
 ## Web application
 
-The interface supports Human vs AI, local Player vs Player, and AI vs AI series. The focused board sizes are 3×3, 5×5, and 9×9, with a configurable winning line from 3 marks through the board size. A newly selected size defaults to `min(size, 5)` marks in a row. AI matches include seeds for local agents, complete move replays, pause/resume, single-step playback, five speeds, and aggregate results. Jev replays use recorded moves; seeds do not reproduce fresh provider responses. English/Polish language and light/dark theme preferences are stored in first-party cookies.
+The interface supports Human vs AI, local Player vs Player, and AI vs AI series. The focused board sizes are 3×3, 5×5, and 9×9, with a configurable winning line from 3 marks through the board size. A newly selected size defaults to `min(size, 5)` marks in a row. Classic 3×3 series stream completed games; larger-board and Jev series show moves as they are calculated. The board and score update during the series, and a completed or stopped series can be replayed move by move with pause, step, and speed controls. Local agents support seeded series; Jev replays use recorded moves because seeds do not reproduce fresh provider responses. English/Polish language and light/dark theme preferences are stored in first-party cookies.
 
 Random and Rules support every board variant. MCTS supports 3×3 and 5×5
 (all three winning lengths); 9×9 MCTS remains disabled. Minimax, Q-learning, DQN,

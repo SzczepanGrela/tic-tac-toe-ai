@@ -88,7 +88,7 @@ G05, J01 and T01 did not block the first release.
 | --- | --- | --- | --- | --- |
 | G01 | complete (2026-09-18) | Rules and engine | none | Strict rules and board validation; all 36 `(N,K)` variants, terminal consistency and original cases covered. |
 | G02 | complete (2026-09-18) | API contract and agent capabilities | G01 | Rules propagated; incompatible agents return 422; absent fields retain 3×3; capabilities include revision, policy and work profile. |
-| G03 | complete (2026-09-18) | Variable board, controls and incremental series | G02 | Dynamic 3×3–10×10 UI, SVG result marker, keyboard navigation, cancellation, paced incremental series, calculation pause/step and replay covered by browser tests. |
+| G03 | complete (updated 2026-09-25) | Variable board, controls and incremental series | G02 | Focused 3×3/5×5/9×9 UI, highlighted winning cells, keyboard navigation, cancellation, live series progress, calculation pause/step and replay covered by browser tests. |
 | G04 | complete (2026-09-18) | General Rules agent | G01, G02 | All variants enabled; wins, blocks, centre selection and legal moves tested; 2,160-sample development benchmark passed. |
 | G05 | complete (2026-09-20) | MCTS for 5×5 K=3/4/5 | G01, G02, G04 | Fixed 256-simulation profiles passed legal/tactical, seed, resource and >=90% non-loss-vs-Random gates; [measurements](mcts-5x5.md). PR #24 passed CI and protected production deployment with Jev disabled. 9×9 remains disabled. |
 | G06 | complete (2026-09-18) | Resource limits and release validation | G03, G04; G05 if included | Queue, cancellation ownership, deadlines, larger smoke, Python 3.12 API suite and production-sized local container passed. |
@@ -137,8 +137,8 @@ G05, J01 and T01 did not block the first release.
 
 - Add size and win-length selectors. Keep 3x3 as the initial experience.
   Changing a rule starts a new game; a configuration cannot change mid-match.
-- Drive the grid, indexing, marks, gaps and reset from `N`. Replace fixed
-  winning-line CSS with coordinate-based rendering such as an SVG overlay.
+- Drive the grid, indexing, marks, gaps and reset from `N`. Highlight the
+  winning cells without drawing a line across their marks.
 - Keep cells usable on narrow screens with a scrollable board when necessary,
   keyboard navigation and accessible coordinate labels.
 - Disable unsupported agents, choose a compatible default after rule changes,
@@ -147,6 +147,11 @@ G05, J01 and T01 did not block the first release.
   `/api/move`. The browser keeps board, progress and replay; the server remains
   stateless. Allow only one outstanding request per series. No background jobs
   or persistent job queue are needed for this release.
+- For classic 3×3 series, stream each completed game through
+  `/api/matches/stream` while retaining the original `/api/matches` contract.
+  Show the game and update its score before the next game is presented. Larger
+  series show each move during calculation. Replays recalculate the visible
+  score as games finish on the board.
 - Define stable per-game/per-ply seed derivation for the new path. Store `N`,
   `K`, seed, agent versions/work profile and actual moves in replay metadata.
   Existing 3x3 series retain their current random-number sequence.
@@ -157,8 +162,8 @@ G05, J01 and T01 did not block the first release.
   a tight retry loop or discard completed games.
 - A server timeout or provider error interrupts a game and is reported
   separately from a legitimate win/loss/draw. No automatic replacement move.
-- Browser tests cover local 3x3/10x10, off-centre wins, changing rules during a
-  request, disabled selections, series completion and replay round trips.
+- Browser tests cover local 3×3/9×9, off-centre wins, changing rules during a
+  request, disabled selections, live series progress and replay round trips.
 
 ### G04 — Rules agent
 
