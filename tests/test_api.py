@@ -102,6 +102,18 @@ def test_favicon_is_served():
     assert response.headers["content-type"].startswith("image/svg+xml")
 
 
+def test_local_fonts_are_served():
+    for name, media_type in (
+        ("AtkinsonHyperlegible-Regular.woff2", "font/woff2"),
+        ("AtkinsonHyperlegible-Bold.woff2", "font/woff2"),
+        ("BarlowCondensed-SemiBold.ttf", "font/ttf"),
+    ):
+        response = request("GET", f"/static/{name}")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith(media_type)
+        assert len(response.content) > 1000
+
+
 def test_locales_have_matching_keys_and_reject_unknown_language():
     english = request("GET", "/locales/en.json")
     polish = request("GET", "/locales/pl.json")

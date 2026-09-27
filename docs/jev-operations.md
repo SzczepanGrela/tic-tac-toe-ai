@@ -1,9 +1,97 @@
 # Optional Jev agent
 
-Implementation and local validation dated 2026-09-20. No production activation
-or paid provider evaluation has been performed by this change. The operator
-approves deployment, runtime credentials/storage and paid evaluation separately.
-MCTS can ship first with `JEV_ENABLED=false` (the default).
+Implementation and local validation dated 2026-09-20. The disabled integration,
+runtime credentials, persistent accounting storage and backup/recovery path
+passed production acceptance on 2026-09-21. Paid provider evaluation began on
+2026-09-22 and has completed every variant through 9×9 K=8. The final 9×9
+K=9 pass is deferred until the evaluation sublimit resets on 2026-10-01. Public
+Jev activation has not been performed.
+The operator approves paid evaluation and activation separately. MCTS shipped
+with `JEV_ENABLED=false` (the default).
+
+## Production acceptance checkpoint
+
+The accepted production state on 2026-09-21 is:
+
+- PR #24 deployed the optional integration and 5×5 MCTS; `JEV_ENABLED=false`
+  keeps Jev unavailable to public requests while local agents remain healthy.
+- Coolify supplies a dedicated runtime-only provider key and
+  `JEV_USAGE_DB=/var/lib/tictactoe/jev/usage.sqlite3`. Key presence was checked
+  without printing its value.
+- The application mounts `/var/lib/tictactoe/jev` read/write from the host. The
+  directory is mode 0700, the SQLite database is mode 0600, and both belong to
+  UID/GID 10001 used by the image. A rolling replacement retained the ledger;
+  a write probe from the replacement container passed.
+- The version-1 ledger passed `quick_check` and was reconciled to verified zero
+  provider spend for September 2026 at tariff `jev-1.13.0:0.042/M`. Status was
+  available with the full $1 monthly application limit before any paid call.
+- PRs #26 and #27 supplied the systemd backup and R2 compatibility controls.
+  rclone 1.75.1 uploaded a paused 20,480-byte copy, downloaded it again and
+  matched its SHA-256 digest. The root-owned local copy remained mode 0600.
+- An isolated restore drill downloaded the R2 object, confirmed that it failed
+  closed while paused, reconciled the copy explicitly, rechecked the unaffected
+  live ledger and removed the test file.
+- A subsequent run of the installed script succeeded, and
+  `tictactoe-jev-backup.timer` was enabled and active for 02:20 UTC daily with
+  up to five minutes of randomized delay.
+
+On 2026-09-22 the operator confirmed that the independent R2 bucket lifecycle
+rule was changed from 90 to 30 days, matching the script. The remaining work is
+to complete the approved paid evaluation, review its private results and only
+then decide whether to set `JEV_ENABLED=true`.
+
+Two initial paid evaluation attempts stopped before covering every variant. The first
+stopped during a 5×5 game; the second stopped at the 9×9 K=3 opening with the
+controlled `probability_sum_invalid` diagnostic. An isolated provider call
+returned a sum of `0.9900000000000001` and passed, while the next returned
+`0.99` and failed at the inclusive `±0.01` boundary. This exposed a binary
+float comparison error in the adapter. The decimal boundary fix was deployed
+on 2026-09-22 as `fb6806f`; the public health endpoint reported that revision
+and the agent list still reported Jev as disabled. A selective 9×9 K=3 run then
+received contract-valid responses for its opening and both tactics, but Jev
+missed the blocking tactic and the first game stopped before its first move.
+Five isolated opening probes produced sums between `0.98999999999999999` and
+`1`; the rejected value
+exceeded the inclusive lower boundary by only `10^-17`. PR #32 deployed as
+`6151c71` keeps the semantic `±0.01` limit and adds a `10^-12` computation
+margin for this serialization artifact. Selective production runs after that
+release completed without another contract rejection.
+
+## Paid evaluation checkpoint — 2026-09-24
+
+The earlier full report on revision `45a7ffe` completed 20 games for each of
+3×3 K=3 and 5×5 K=3/4/5 before the old probability boundary check stopped at
+the 9×9 opening. Selective private reports after the fix covered 9×9 K=3–8.
+Together they produced the following operator-reviewed evidence. Results use
+`W/D/L` for Jev wins, draws and losses, split by the side played by Jev:
+
+| Variant | Games / Jev moves | Win / block tactic | Results | Jev move latency |
+| --- | ---: | --- | --- | --- |
+| 3×3 K=3 | 20 / 75 | pass / fail | Random X: 3/0/2, O: 2/0/3; Rules X: 0/0/5, O: 0/5/0 | avg 0.276 s; p95 0.333 s; max 0.743 s |
+| 5×5 K=3 | 20 / 68 | fail / fail | Random X: 5/0/0, O: 4/0/1; Rules X: 5/0/0, O: 0/0/5 | avg 0.268 s; p95 0.318 s; max 0.328 s |
+| 5×5 K=4 | 20 / 101 | pass / pass | Random X: 5/0/0, O: 4/0/1; Rules X: 0/0/5, O: 0/0/5 | avg 0.277 s; p95 0.336 s; max 0.415 s |
+| 5×5 K=5 | 20 / 162 | pass / pass | Random X: 4/1/0, O: 2/2/1; Rules X: 0/1/4, O: 0/0/5 | avg 0.279 s; p95 0.340 s; max 0.369 s |
+| 9×9 K=3 | 20 / 78 | pass / fail | Random X: 5/0/0, O: 5/0/0; Rules X: 2/0/3, O: 0/0/5 | avg 0.324 s; p95 0.394 s; max 0.489 s |
+| 9×9 K=4 | 20 / 92 | pass / pass | Random X: 5/0/0, O: 5/0/0; Rules X: 0/0/5, O: 0/0/5 | avg 0.330 s; p95 0.415 s; max 0.529 s |
+| 9×9 K=5 | 20 / 111 | pass / pass | Random X: 5/0/0, O: 5/0/0; Rules X: 0/0/5, O: 0/0/5 | avg 0.337 s; p95 0.445 s; max 0.585 s |
+| 9×9 K=6 | 20 / 141 | pass / fail | Random X: 5/0/0, O: 5/0/0; Rules X: 0/0/5, O: 0/0/5 | avg 0.475 s; p95 1.590 s; max 4.144 s |
+| 9×9 K=7 | 20 / 268 | pass / pass | Random X: 5/0/0, O: 5/0/0; Rules X: 0/0/5, O: 0/0/5 | avg 0.270 s; p95 0.321 s; max 0.649 s |
+| 9×9 K=8 | 20 / 361 | fail / pass | Random X: 3/1/1, O: 3/1/1; Rules X: 0/0/5, O: 0/0/5 | avg 0.475 s; p95 0.816 s; max 3.755 s |
+
+All 20-game variant samples in the table completed. The selective 9×9 reports
+emitted `complete`, with no interrupted game or `stopped` record. Legal response
+validation and usable latency are therefore confirmed through K=8. Playing
+strength is generally weak against Rules and tactical fixture results vary by
+winning length; that is acceptable only under the documented experimental label
+and must be visible in the activation decision.
+
+After K=8 the September ledger reported `$0.175312662` total use, including the
+earlier evaluation attempts and isolated diagnostics. About `$0.0747` remained
+inside the `$0.25` evaluation sublimit. A 20-game K=9 run is expected to need
+roughly 800 Jev moves and about `$0.08`, so it was deliberately deferred until
+the UTC-month reset instead of being allowed to stop part-way. `JEV_ENABLED`
+remains `false`. This checkpoint does not establish K=9 quality or justify
+public activation.
 
 ## Contract and availability
 
@@ -129,6 +217,31 @@ not overwrite prior output. Retain results privately and summarize per variant
 and starting side; do not infer quality from mocked responses. There is no
 minimum playing-strength gate for the experimental label, but legality,
 accounting and usable latency must be confirmed before enabling public play.
+Omitting `--variant` evaluates every variant in order. To avoid paying again
+for variants completed in an earlier report, repeat `--variant SIZE:K` for only
+the variants still needed, using a new output file. For example, a small 9×9
+K=3 pass is:
+
+```bash
+python -m web.jev_evaluate --confirm-paid-evaluation \
+  --games-per-side 1 --variant 9:3 \
+  --output /var/lib/tictactoe/jev/jev-evaluation-9-3.jsonl
+```
+
+The private `start` record lists the selected variants. A selected variant
+starts from its opening; it does not resume an interrupted game. Duplicate or
+unsupported selections fail before the provider client is initialized. Review
+completed games in earlier private reports separately before selecting a new
+scope; never count an interrupted game as completed.
+Each invocation assigns game seeds from `30000` again. Reducing
+`--games-per-side` and later running the same variant repeats the lower-numbered
+seeds; it is not a continuation. If the remaining monthly evaluation allowance
+cannot cover the intended sample, wait for the next UTC month and run the full
+sample rather than paying for duplicated partial coverage.
+If a provider response fails the application contract, the public API keeps the
+single `provider_response_invalid` error while this private file adds only a
+controlled diagnostic category. It never stores the raw provider response,
+credentials or request headers.
 
 ## Backup, recovery and rollback
 
@@ -141,6 +254,59 @@ python -m web.jev_admin backup /var/lib/tictactoe/jev/usage-backup.sqlite3
 It uses SQLite's backup API and marks the **copy** paused. The live database
 remains active. Choose off-host destination and retention explicitly; this
 command alone is not disaster recovery. Keep dumps out of the repository/image.
+
+Production uses [`infra/tictactoe-jev-backup`](../infra/tictactoe-jev-backup)
+with the matching systemd service and timer in `infra/systemd`. It runs daily at
+02:20 UTC with up to five minutes of randomized delay. The job requires the
+approved host bind mount and permissions, selects a healthy production replica,
+creates the copy through `web.jev_admin`, and checks SQLite integrity, schema,
+tariff and the copy's paused flag. It then uploads to the dedicated
+`grela-tictactoe-jev-backups` R2 bucket and downloads the small object again to
+compare its SHA-256 digest. It keeps 14 local copies and deletes R2 ledger
+objects older than 30 days. A failed upload or validation leaves the local copy
+and fails the unit; it must be monitored rather than treated as success.
+
+The rclone configuration lives only at `/etc/rclone/tictactoe-jev.conf`, owned
+by root with mode 0600. Use a dedicated R2 access key restricted to object
+read/write access for this bucket. Do not reuse Coolify's backup credentials or
+store an R2 secret in the repository, unit file, application environment or
+command history. The root-owned local backup directory is mode 0700 and the
+copies are mode 0600. Installation is incomplete until one manual unit run,
+remote checksum verification, timer inspection and a restore drill have passed.
+
+Create the private bucket and its bucket-scoped key before configuring the host.
+Add a bucket lifecycle rule with no prefix that deletes objects after 30 days;
+this enforces remote retention even if the VPS job stops running. The script's
+own remote deletion is an independent second enforcement path.
+The root-only rclone file has this shape (replace the three placeholders locally;
+do not paste their values into an issue, log or chat):
+
+```ini
+[tictactoe-jev-r2]
+type = s3
+provider = Cloudflare
+access_key_id = <R2_ACCESS_KEY_ID>
+secret_access_key = <R2_SECRET_ACCESS_KEY>
+region = auto
+endpoint = https://<CLOUDFLARE_ACCOUNT_ID>.r2.cloudflarestorage.com
+no_check_bucket = true
+```
+
+Use the jurisdiction-specific endpoint instead when the bucket has an explicit
+R2 jurisdiction. Do not set `acl` or `bucket_acl`: R2 rejects the corresponding
+S3 ACL headers. Use rclone 1.61 or newer; older releases send a private ACL even
+when the setting is absent. `no_check_bucket` prevents rclone from attempting
+`CreateBucket`, which a bucket-scoped object key intentionally cannot perform.
+Install `rclone`, the versioned script and both units, then run
+the service manually. Inspect `systemctl status`, the root-only local file and
+`rclone lsl tictactoe-jev-r2:grela-tictactoe-jev-backups` without printing the
+configuration. Enable the timer only after the restore drill described below.
+
+This compatibility requirement was confirmed on 2026-09-21. Debian's rclone
+1.60.1 first failed with R2's unsupported ACL behavior. After updating, an
+object-scoped key exposed the second error as a denied `CreateBucket` request.
+rclone 1.75.1 plus `no_check_bucket` completed the upload, remote readback and
+SHA-256 comparison without granting bucket-creation permission.
 
 For restore, first disable/pause Jev in every replica and allow outstanding calls
 to finish. Preserve the current ledger; restore the paused copy with correct
@@ -156,9 +322,14 @@ versions disable Jev. Future schema changes need old/new compatibility tests.
 Rollback to an image without Jev leaves the ledger mounted and unused. Never
 restore an older balance as part of an application rollback.
 
-## Sources reviewed on 2026-09-20
+## Sources reviewed (latest review 2026-09-21)
 
 - [TypeSafe models and tariff](https://docs.typesafe.ai/models)
 - [Choice contract](https://docs.typesafe.ai/primitives/choice)
 - [Python SDK](https://docs.typesafe.ai/sdk/python/usage)
 - [SQLite online backup](https://www.sqlite.org/backup.html)
+- [Cloudflare R2 authentication](https://developers.cloudflare.com/r2/api/tokens/)
+- [Cloudflare R2 S3 compatibility](https://developers.cloudflare.com/r2/api/s3/api/)
+- [rclone Cloudflare R2 configuration](https://rclone.org/s3/#cloudflare-r2)
+- [rclone `no_check_bucket`](https://rclone.org/s3/#s3-no-check-bucket)
+- [rclone release signing](https://rclone.org/release_signing/)
