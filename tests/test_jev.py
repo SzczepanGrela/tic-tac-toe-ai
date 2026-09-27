@@ -1,5 +1,6 @@
 import asyncio
 import json
+import sys
 from types import SimpleNamespace
 
 import httpx2
@@ -113,11 +114,79 @@ def test_invalid_move_is_not_replaced_by_another_agent(ledger):
     async def exercise():
         service = JevService(client_with_handler(handler), ledger)
         try:
-            with pytest.raises(JevError, match="provider_response_invalid"):
+            with pytest.raises(JevError, match="provider_response_invalid") as exc:
                 await service.select_move(GameState())
+            assert exc.value.diagnostic == "choice_not_in_criteria"
             assert ledger.status()["used_nano_usd"] == 4200
         finally:
             await service.aclose()
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "diagnostic"),
+    [
+        ("probabilities", {"r1c1": 1.0}, "probability_key_mismatch"),
+        ("probabilities", None, "probability_sum_invalid"),
+        ("confidence", 2.0, "confidence_invalid"),
+    ],
+)
+def test_invalid_response_diagnostics_are_controlled(ledger, field, value, diagnostic):
+    def handler(request):
+        payload = json.loads(request.content)
+        data = response_for(payload)
+        if field == "probabilities" and value is None:
+            choices = payload["questions"]["move"]["criteria"]
+            data["answers"]["move"][field] = {key: 0.1 for key in choices}
+        else:
+            data["answers"]["move"][field] = value
+        return httpx2.Response(200, json=data)
+
+    async def exercise():
+        service = JevService(client_with_handler(handler), ledger)
+        try:
+            with pytest.raises(JevError, match="provider_response_invalid") as exc:
+                await service.select_move(GameState())
+            assert exc.value.diagnostic == diagnostic
+            assert str(exc.value) == "provider_response_invalid"
+        finally:
+            await service.aclose()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    ("values", "valid"),
+    [([0.33, 0.33, 0.32999999999999996], True),
+     ([0.34, 0.34, 0.33000000000000007], True),
+     ([0.33, 0.33, 0.329999999998], False),
+     ([0.34, 0.34, 0.330000000002], False),
+     ([0.33, 0.33, 0.32], False),
+     ([0.34, 0.34, 0.34], False)],
+)
+def test_probability_sum_includes_decimal_boundary_for_large_board(ledger, values, valid):
+    def handler(request):
+        payload = json.loads(request.content)
+        data = response_for(payload)
+        probabilities = data["answers"]["move"]["probabilities"]
+        for key, value in zip(probabilities, values):
+            probabilities[key] = value
+        return httpx2.Response(200, json=data)
+
+    async def exercise():
+        service = JevService(client_with_handler(handler), ledger)
+        try:
+            state = GameState(rules=GameRules(9, 3))
+            if valid:
+                move, _ = await service.select_move(state)
+                assert move == (0, 0)
+            else:
+                with pytest.raises(JevError) as exc:
+                    await service.select_move(state)
+                assert exc.value.diagnostic == "probability_sum_invalid"
+        finally:
+            await service.aclose()
+
     asyncio.run(exercise())
 
 
@@ -249,3 +318,50 @@ def test_evaluator_uses_evaluation_budget_and_does_not_score_partial_games():
         asyncio.run(evaluate(Service(), records.append, games=1, variants=[(3, 3)]))
     assert records[-1]["type"] == "interrupted_game"
     assert not any(record["type"] == "game" for record in records)
+
+
+def test_paid_evaluator_only_runs_selected_variants(tmp_path, monkeypatch):
+    from web import jev_evaluate
+
+    class Service:
+        ledger = SimpleNamespace(status=lambda: {"available": True})
+
+        async def reason(self):
+            return None
+
+        async def aclose(self):
+            pass
+
+    selected = []
+
+    async def record_selection(_service, _emit, *, games, variants):
+        selected.append((games, variants))
+
+    monkeypatch.setattr(jev_evaluate.JevService, "from_environment", Service)
+    monkeypatch.setattr(jev_evaluate, "evaluate", record_selection)
+    output = tmp_path / "evaluation.jsonl"
+    monkeypatch.setattr(sys, "argv", ["jev_evaluate", "--confirm-paid-evaluation",
+                                       "--output", str(output), "--games-per-side", "1",
+                                       "--variant", "9:3", "--variant", "9:4"])
+
+    assert jev_evaluate.main() == 0
+    assert selected == [(1, [(9, 3), (9, 4)])]
+    records = [json.loads(line) for line in output.read_text().splitlines()]
+    assert records[0]["variants"] == ["9:3", "9:4"]
+    assert records[-1]["type"] == "complete"
+
+
+@pytest.mark.parametrize("selection", [["--variant", "9:10"], ["--variant", "9"],
+                                           ["--variant", "9:3", "--variant", "9:3"]])
+def test_invalid_variant_selection_stops_before_paid_client(tmp_path, monkeypatch, selection):
+    from web import jev_evaluate
+
+    def unexpected_client():
+        pytest.fail("Invalid selection must not initialize the paid client")
+
+    monkeypatch.setattr(jev_evaluate.JevService, "from_environment", unexpected_client)
+    monkeypatch.setattr(sys, "argv", ["jev_evaluate", "--confirm-paid-evaluation",
+                                       "--output", str(tmp_path / "evaluation.jsonl"), *selection])
+    with pytest.raises(SystemExit) as exc:
+        jev_evaluate.main()
+    assert exc.value.code == 2

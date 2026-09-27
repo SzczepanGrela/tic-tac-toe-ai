@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the Tic-Tac-Toe Jev ledger backup daily
+
+[Timer]
+OnCalendar=*-*-* 02:20:00 UTC
+Persistent=true
+RandomizedDelaySec=5m
+AccuracySec=1m
+Unit=tictactoe-jev-backup.service
+
+[Install]
+WantedBy=timers.target
