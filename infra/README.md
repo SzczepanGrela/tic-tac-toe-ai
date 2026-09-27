@@ -23,6 +23,31 @@ CMD health check with the same command. Docker executes the effective check insi
 the container, while Coolify waits for Docker to report the new container as
 healthy before completing a rolling update and removing the previous container.
 
+## Updating Python dependencies
+
+Change the requirement ranges and regenerate `requirements-web.lock` together.
+The image installs the lock with hash verification. Backend and browser CI use
+that same lock, then install `requirements-test.txt`; the training smoke job
+uses its separate training requirements. Development installs include all three.
+
+Regenerate in a clean **Python 3.12** environment using `pip-tools`:
+
+```bash
+python -m pip install pip-tools
+pip-compile --generate-hashes --resolver=backtracking --output-file=requirements-web.lock requirements-web.txt
+python -m pip install --require-hashes -r requirements-web.lock
+python -m pip install -r requirements-test.txt
+python -m infra.check_runtime_lock --installed
+python -m pip check
+```
+
+The check rejects missing runtime packages, stale pins, missing extras and test
+tooling that changes installed locked versions. Hash verification and `pip check`
+cover artifact integrity and installed transitive requirements. CI exercises both
+Python 3.12 and 3.13; changing the production Python version remains a separate
+compatibility decision. Review the lock diff, pass backend/browser/training and
+container checks, and deploy the resulting tested digest.
+
 ## Coolify application contract
 
 [`coolify-production.json`](coolify-production.json) records the nonsecret fields
