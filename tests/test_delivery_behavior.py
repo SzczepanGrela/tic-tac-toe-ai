@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+import logging
+import re
 import socket
 import threading
 import time
@@ -153,6 +155,27 @@ def test_full_work_queue_preserves_health_then_recovers(monkeypatch, path):
     asyncio.run(exercise())
 
 
+@pytest.fixture
+def stream_logs(caplog, monkeypatch):
+    logger = web_app.STREAM_LOGGER
+    caplog.set_level(logging.INFO, logger=logger.name)
+    monkeypatch.setattr(logger, "propagate", False)
+    logger.addHandler(caplog.handler)
+    try:
+        yield lambda: [r.getMessage() for r in caplog.records if r.name == logger.name]
+    finally:
+        logger.removeHandler(caplog.handler)
+
+
+def wait_for_log(logs, fragment):
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        if any(fragment in line for line in logs()):
+            return
+        time.sleep(0.005)
+    pytest.fail(f"Missing delivery log: {fragment}")
+
+
 @pytest.fixture(params=["h11", "httptools"])
 def http_server(monkeypatch, request):
     """Use a real socket: an in-process HTTP transport buffers streamed bodies."""
@@ -179,7 +202,7 @@ def http_server(monkeypatch, request):
             assert not thread.is_alive(), "test HTTP server did not stop"
 
 
-def test_http_stream_delivers_game_before_next_game_finishes(monkeypatch, http_server):
+def test_http_stream_delivers_game_before_next_game_finishes(monkeypatch, http_server, stream_logs):
     simulate = web_app._simulate_match_game
     second_started = threading.Event()
     release_second = threading.Event()
@@ -192,8 +215,11 @@ def test_http_stream_delivers_game_before_next_game_finishes(monkeypatch, http_s
 
     monkeypatch.setattr(web_app, "_simulate_match_game", controlled)
     try:
-        with httpx.stream("POST", f"{http_server}/api/matches/stream", json=MATCH | {"games": 2}, timeout=2) as response:
+        with httpx.stream("POST", f"{http_server}/api/matches/stream", json=MATCH | {"games": 2},
+                          headers={"X-Stream-ID": "untrusted-client-marker"}, timeout=2) as response:
             assert response.status_code == 200
+            stream_id = response.headers["x-stream-id"]
+            assert re.fullmatch(r"[0-9a-f]{32}", stream_id)
             assert response.headers["content-type"].startswith("application/x-ndjson")
             assert "no-transform" in response.headers["cache-control"]
             lines = response.iter_lines()
@@ -205,11 +231,19 @@ def test_http_stream_delivers_game_before_next_game_finishes(monkeypatch, http_s
             remaining = [json.loads(line) for line in lines]
             assert remaining[0]["game"]["game"] == 2
             assert remaining[1:] == [{"type": "complete"}]
+        wait_for_log(stream_logs, f"id={stream_id} event=closed outcome=complete completed_games=2")
+        for game in (1, 2):
+            assert any(f"id={stream_id} game={game} event=finished outcome=completed" in line
+                       for line in stream_logs())
+        assert all("untrusted-client-marker" not in line for line in stream_logs())
+        assert all("seed=" not in line and "board=" not in line for line in stream_logs())
+        another = httpx.post(f"{http_server}/api/matches/stream", json=MATCH, timeout=2)
+        assert another.headers["x-stream-id"] != stream_id
     finally:
         release_second.set()
 
 
-def test_http_disconnect_stops_stream_worker_and_later_games(monkeypatch, http_server):
+def test_http_disconnect_stops_stream_worker_and_later_games(monkeypatch, http_server, stream_logs):
     simulate = web_app._simulate_match_game
     second_started = threading.Event()
     second_stopped = threading.Event()
@@ -231,11 +265,42 @@ def test_http_disconnect_stops_stream_worker_and_later_games(monkeypatch, http_s
     monkeypatch.setattr(web_app, "_simulate_match_game", controlled)
     try:
         with httpx.stream("POST", f"{http_server}/api/matches/stream", json=MATCH | {"games": 3}, timeout=2) as response:
+            stream_id = response.headers["x-stream-id"]
             assert json.loads(next(response.iter_lines()))["game"]["game"] == 1
             assert second_started.wait(2)
         assert second_stopped.wait(2), "disconnected stream kept computing"
+        wait_for_log(stream_logs, f"id={stream_id} game=2 event=finished outcome=stopped")
+        wait_for_log(stream_logs, f"id={stream_id} event=closed outcome=cancelled completed_games=1")
         assert games == [1, 2]
+        assert not any(f"id={stream_id} game=3 " in line for line in stream_logs())
         assert httpx.get(f"{http_server}/api/health", timeout=2).status_code == 200
         assert httpx.post(f"{http_server}/api/matches", json=MATCH, timeout=2).status_code == 200
     finally:
         cleanup.set()
+
+
+def test_stream_timeout_does_not_log_worker_completion_before_it_exits(monkeypatch, http_server, stream_logs):
+    simulate = web_app._simulate_match_game
+    started = threading.Event()
+    release = threading.Event()
+
+    def controlled(*args):
+        started.set()
+        assert release.wait(5), "test did not release worker"
+        return simulate(*args)
+
+    monkeypatch.setattr(web_app, "_simulate_match_game", controlled)
+    monkeypatch.setattr(web_app, "AI_MATCH_TIMEOUT_SECONDS", 0.05)
+    try:
+        response = httpx.post(f"{http_server}/api/matches/stream", json=MATCH, timeout=2)
+        stream_id = response.headers["x-stream-id"]
+        assert started.is_set()
+        assert response.status_code == 200
+        assert response.json() == {"type": "error", "detail": "AI computation timed out"}
+        wait_for_log(stream_logs, f"id={stream_id} event=closed outcome=error completed_games=0")
+        assert not any(f"id={stream_id} game=1 event=finished" in line for line in stream_logs())
+        assert app.state.work_gate._semaphore._value == 1
+        release.set()
+        wait_for_log(stream_logs, f"id={stream_id} game=1 event=finished outcome=stopped")
+    finally:
+        release.set()
