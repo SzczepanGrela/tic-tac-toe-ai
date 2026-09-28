@@ -171,6 +171,10 @@ preserve the current Jev ledger. The unused SSH deployment scripts and their
 dedicated tests were removed after their workflow and credential consumers had
 been retired. There is no alternate SSH deployment procedure to configure.
 
+The [limits and streaming acceptance guide](../docs/delivery-verification.md)
+separates automated endpoint/queue/real-HTTP checks from public ingress and
+rolling-replica acceptance. Per-process budgets are not shared across replicas.
+
 ## Jev ledger backup
 
 [`tictactoe-jev-backup`](tictactoe-jev-backup) and the units in
