@@ -161,15 +161,15 @@ The protected production environment, Tailscale path, Coolify contract,
 managed health gate, failed-candidate cancellation, public-smoke rollback,
 release serialization, rolling capacity, and automatic tested-digest promotion
 were accepted in September 2026. `PRODUCTION_DEPLOY_ENABLED` is enabled. The
-isolated canary and its manual validation workflows were temporary acceptance
-infrastructure. Their source harness is retired by this cleanup; remove the
-matching no-domain Coolify resource as the separate final step. Historical run
-evidence remains in GitHub Actions and the private infrastructure record.
+isolated canary, source harness and manual validation workflows were retired
+after acceptance on September 17. Historical run evidence remains in GitHub
+Actions and the private infrastructure record.
 
-The older `deploy.sh` and forced-command launcher remain available only as a
-reviewed emergency fallback during this transition. The current workflow does not
-use SSH or Nginx Proxy Manager. Remove the legacy scripts, their deployment key,
-and their tests after the Coolify path has completed the activation sequence.
+Coolify is the production release and recovery path. To restore a release,
+select a previous qualified digest through the protected deployment workflow;
+preserve the current Jev ledger. The unused SSH deployment scripts and their
+dedicated tests were removed after their workflow and credential consumers had
+been retired. There is no alternate SSH deployment procedure to configure.
 
 ## Jev ledger backup
 
