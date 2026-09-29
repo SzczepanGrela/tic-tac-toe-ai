@@ -16,11 +16,12 @@ from typing import TypeVar
 from ai.execution import SearchBudget, SearchStopped, check_search, current_budget
 from ai.jev import JevError, JevService
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, StrictInt, model_validator
 
 from ai.registry import AgentId, AgentRegistry
 from game.state import GameRules, GameState
+from web.security_headers import SECURITY_HEADERS, SecurityHeadersMiddleware
 
 STATIC_DIR = Path(__file__).parent / "static"
 STATIC_ASSETS = {
@@ -261,7 +262,18 @@ async def lifespan(app: FastAPI):
         await app.state.jev.aclose()
 
 
-app = FastAPI(title="Tic-Tac-Toe AI Lab", version="2.1.0", lifespan=lifespan)
+app = FastAPI(
+    title="Tic-Tac-Toe AI Lab", version="2.1.0", lifespan=lifespan,
+    docs_url=None, redoc_url=None,
+)
+app.add_middleware(SecurityHeadersMiddleware)
+
+
+@app.exception_handler(Exception)
+async def internal_error(request: Request, exc: Exception) -> PlainTextResponse:
+    # Starlette generates unhandled 500 responses outside user middleware.
+    # Preserve its generic body and exception logging, with the same policy.
+    return PlainTextResponse("Internal Server Error", status_code=500, headers=SECURITY_HEADERS)
 
 
 def _client_ip(request: Request) -> str:

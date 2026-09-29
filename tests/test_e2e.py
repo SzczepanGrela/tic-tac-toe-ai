@@ -9,6 +9,51 @@ if os.getenv("RUN_E2E") != "1":
 from playwright.sync_api import expect
 
 
+@pytest.fixture(autouse=True)
+def reject_unexpected_csp_violations(page):
+    violations = []
+    page.expose_function("recordCspViolation", lambda violation: violations.append(violation))
+    page.add_init_script("""
+        document.addEventListener('securitypolicyviolation', event => {
+            window.recordCspViolation({directive: event.effectiveDirective, uri: event.blockedURI});
+        });
+    """)
+    yield
+    assert not violations, f"CSP blocked application behavior: {violations}"
+
+
+def test_csp_blocks_injected_scripts_and_external_connections(browser, live_server_url):
+    # Use a separate page because violations here are intentional.
+    page = browser.new_page()
+    try:
+        page.add_init_script("""
+            window.violations = [];
+            document.addEventListener('securitypolicyviolation', event => {
+                window.violations.push({directive: event.effectiveDirective, uri: event.blockedURI});
+            });
+        """)
+        page.goto(live_server_url)
+        expect(page.locator(".cell")).to_have_count(9)
+        page.evaluate("""() => {
+            const inline = document.createElement('script');
+            inline.textContent = 'window.injectedScriptRan = true';
+            document.body.append(inline);
+            const external = document.createElement('script');
+            external.src = 'https://csp-probe.invalid/script.js';
+            document.body.append(external);
+            fetch('https://csp-probe.invalid/collect').catch(() => {});
+        }""")
+        page.wait_for_function("window.violations.length >= 3")
+        assert page.evaluate("window.injectedScriptRan === undefined")
+        violations = page.evaluate("window.violations")
+        assert any(item["uri"] == "inline" for item in violations)
+        assert any(item["directive"] == "script-src-elem" and "csp-probe.invalid" in item["uri"]
+                   for item in violations)
+        assert any(item["directive"] == "connect-src" for item in violations)
+    finally:
+        page.close()
+
+
 def test_initial_view_contains_only_human_vs_ai_controls(page, live_server_url):
     page.goto(live_server_url)
     expect(page.locator("#human-agent-field")).to_be_visible()
@@ -443,9 +488,10 @@ def test_jev_classic_series_is_incremental_and_preserves_completed_games(page, l
     page.locator("#series-count").select_option("3")
     page.get_by_role("button", name="Run series").click()
     if ending == "stop":
-        page.wait_for_function("window.moveRequests === 8")
+        expect(page.get_by_role("status")).to_have_text("Game 2/3")
+        assert page.evaluate("window.moveRequests") == 8
         page.locator("#stop-series").click()
-    page.wait_for_function("Boolean(replay)")
+    expect(page.get_by_role("button", name="Replay", exact=True)).to_be_visible()
     expect(page.locator("#scoreboard")).to_be_visible()
     assert page.evaluate("window.batchRequests") == 0
     expect(page.locator("#x-wins")).to_have_text("3" if ending == "complete" else "1")

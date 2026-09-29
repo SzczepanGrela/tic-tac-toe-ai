@@ -222,6 +222,8 @@ def test_http_stream_delivers_game_before_next_game_finishes(monkeypatch, http_s
             assert re.fullmatch(r"[0-9a-f]{32}", stream_id)
             assert response.headers["content-type"].startswith("application/x-ndjson")
             assert "no-transform" in response.headers["cache-control"]
+            assert response.headers["x-content-type-options"] == "nosniff"
+            assert "connect-src 'self'" in response.headers["content-security-policy"]
             lines = response.iter_lines()
             first = json.loads(next(lines))
             assert first["type"] == "game" and first["game"]["game"] == 1

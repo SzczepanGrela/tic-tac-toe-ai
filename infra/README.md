@@ -23,6 +23,39 @@ CMD health check with the same command. Docker executes the effective check insi
 the container, while Coolify waits for Docker to report the new container as
 healthy before completing a rolling update and removing the previous container.
 
+## Browser security headers
+
+The application sets these headers on HTML, assets, API/stream responses and
+errors, including unhandled 500 responses:
+
+- `Content-Security-Policy`: deny resources by default; allow scripts, styles,
+  images, fonts and fetch connections only from the same origin. Disallow base
+  URL changes, form submissions and embedding in frames. No `unsafe-inline`,
+  `unsafe-eval` or third-party script exceptions are enabled.
+- `X-Content-Type-Options: nosniff`.
+- `X-Frame-Options: DENY`, alongside CSP `frame-ancestors 'none'`.
+- `Referrer-Policy: strict-origin-when-cross-origin`.
+
+The policy lives in [`web/security_headers.py`](../web/security_headers.py).
+The pure ASGI middleware only changes response-start headers; it does not
+buffer streamed games or intercept client disconnects. Direct CSS property
+updates used by the board remain compatible with `style-src 'self'`.
+The default CDN-based Swagger/ReDoc pages (`/docs`, `/redoc`) are disabled;
+the API schema remains available at `/openapi.json`. Typesafe is called only
+by the backend and needs no browser CSP allowance. HSTS remains an HTTPS-edge
+setting; this app also serves plain HTTP inside the private container network.
+
+Browser tests reject unexpected CSP violations while exercising the existing
+game, language/theme, responsive board and streaming scenarios. A separate test
+checks that injected inline/external scripts and external fetches are blocked.
+The exact-image and post-deployment smoke checks require the four headers on
+the main page and favicon. The baseline check used before deployment and during
+rollback deliberately accepts older images without these headers.
+
+For future applications, review their actual resource and connection origins
+before reusing this policy. Do not weaken it globally to accommodate an optional
+analytics widget or an automatically injected proxy script.
+
 ## Updating Python dependencies
 
 Change the requirement ranges and regenerate `requirements-web.lock` together.
