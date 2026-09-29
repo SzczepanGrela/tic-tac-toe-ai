@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import urllib.request
+from email.message import Message
 
 import pytest
 
@@ -74,7 +75,11 @@ def test_smokecheck_validates_health_assets_and_real_move(monkeypatch) -> None:
                     "win_length": win_length,
                 }
             )
-        return response(b"x")
+        asset = response(b"x")
+        asset.headers = Message()
+        for name, value in smokecheck.SECURITY_HEADERS.items():
+            asset.headers[name] = value
+        return asset
 
     monkeypatch.setattr(smokecheck, "_open", fake_open)
 
@@ -159,3 +164,21 @@ def test_smokecheck_rejects_a_different_revision(monkeypatch) -> None:
 def test_smokecheck_rejects_credentials_in_the_url() -> None:
     with pytest.raises(ValueError, match="credentials"):
         smokecheck.check_release("https://user:pass@example.test", REVISION)
+
+
+@pytest.mark.parametrize("name", list(smokecheck.SECURITY_HEADERS))
+@pytest.mark.parametrize("value", [None, "incorrect-policy"])
+def test_new_release_rejects_missing_or_changed_security_headers(monkeypatch, name, value):
+    def fake_open(request, timeout):
+        asset = response(b"x")
+        asset.headers = Message()
+        for key, expected in smokecheck.SECURITY_HEADERS.items():
+            if key != name:
+                asset.headers[key] = expected
+        if value is not None:
+            asset.headers[name] = value
+        return asset
+
+    monkeypatch.setattr(smokecheck, "_open", fake_open)
+    with pytest.raises(ValueError, match=name):
+        smokecheck._check_assets("http://test", timeout=4, require_security_headers=True)

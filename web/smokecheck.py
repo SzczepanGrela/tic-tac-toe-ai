@@ -9,6 +9,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Mapping
 
+from web.security_headers import SECURITY_HEADERS
 
 REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 DEFAULT_BASE_URL = "http://127.0.0.1:8080"
@@ -73,7 +74,7 @@ def _check_health(
         raise ValueError("at least one agent is not ready")
 
 
-def _check_assets(base_url: str, *, timeout: int) -> None:
+def _check_assets(base_url: str, *, timeout: int, require_security_headers: bool = False) -> None:
     for path in ("/", "/static/favicon.svg"):
         request = urllib.request.Request(
             _url(base_url, path),
@@ -82,6 +83,10 @@ def _check_assets(base_url: str, *, timeout: int) -> None:
         with _open(request, timeout) as response:
             if response.status != 200 or not response.read(1):
                 raise ValueError(f"{path} is not available")
+            if require_security_headers:
+                for name, value in SECURITY_HEADERS.items():
+                    if response.headers.get(name) != value:
+                        raise ValueError(f"{path} has missing or unexpected {name}")
 
 
 def check_baseline_release(
@@ -127,7 +132,7 @@ def check_release(
     if not {"random", "rules"} <= available or available - {"random", "rules", "jev"}:
         raise ValueError("larger-board agent capabilities are incorrect")
 
-    _check_assets(base_url, timeout=timeout)
+    _check_assets(base_url, timeout=timeout, require_security_headers=True)
 
     variants = (
         (3, 3, {"algorithm": "rules", "seed": 1}),
