@@ -95,7 +95,7 @@ public activation.
 
 ## Contract and availability
 
-The official `typesafe-sdk==0.7.0` async client uses pinned model `jev-1.13.0`
+The official `typesafe-sdk==0.7.1` async client uses pinned model `jev-1.13.0`
 and prompt `jev-game-v2`. The structured state names the board size, required
 line length, side to move, opponent, complete board, cell symbols and 1-based
 coordinates. The structured Choice instructions define the game, first-win

@@ -190,3 +190,15 @@ successful upload/readback verification, an isolated fail-closed restore and an
 active daily timer. The application remains at `JEV_ENABLED=false` pending paid
 evaluation. Keep the script's 30-day remote retention aligned with the bucket's
 independent lifecycle rule.
+
+## Operating exception and documentation changes
+
+The operator accepts process-local request budgets for one normal process and
+brief managed-rolling overlap. See [scope and reconsideration triggers](../docs/delivery-verification.md#accepted-single-instance-operating-boundary).
+This does not relax Jev accounting or authorize permanent replicas without a
+new consistency decision. Shared request counters are not installed.
+
+Documentation-only merges do not need a production rollout. Run the required
+checks; if Quality creates a protected deployment for such a merge, leave the
+production approval ungranted and cancel that pending run after verification.
+Record the deployed code revision separately from the newer documentation head.

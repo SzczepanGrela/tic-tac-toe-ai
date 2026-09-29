@@ -1,6 +1,6 @@
 # Limits and streaming acceptance
 
-Reviewed 2026-09-28. These checks supplement the accepted Coolify image release,
+Reviewed 2026-09-29. These checks supplement the accepted Coolify image release,
 health gate and rollback. The private infrastructure checklist owns D04 status;
 passing CI does not certify the public proxy path or multiple replicas.
 
@@ -91,3 +91,21 @@ Local proxy middleware tests do not establish production forwarding trust,
 cross-application edge budgets, or independent public-client isolation. Public
 event timing does not establish termination of work behind every proxy after
 a disconnect. Keep those acceptance scopes explicit in the dated app record.
+
+## Accepted single-instance operating boundary
+
+On 2026-09-29 the operator accepted process-local move/series limits for normal
+single-process operation with brief old/new overlap during managed rolling.
+The dated public test delivered a ten-game MCTS series and `complete`, including
+games 9–10 after the old container received SIGTERM. A separate local HTTP test
+confirmed that subsequent board-based requests can run on another process while
+rate buckets remain independent and a replacement starts with fresh allowance.
+
+No shared counter was installed. The increase depends on routing, refill and
+replacements; “twice the limit for one minute” is not an enforced bound. Revisit
+this exception before sustained replicas, multiple workers, strict client
+quotas or measured overload. Jev's durable paid-cost guard is unchanged.
+Same-location Cloudflare client isolation and wider platform hardening,
+observability and recovery remain separate acceptance scopes in the private
+operator record. This decision does not generalize the sampled drain to every
+long-running request or make statelessness imply shared in-memory budgets.
