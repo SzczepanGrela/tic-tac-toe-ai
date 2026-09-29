@@ -3,12 +3,12 @@
 Implementation and local validation dated 2026-09-20. The disabled integration,
 runtime credentials, persistent accounting storage and backup/recovery path
 passed production acceptance on 2026-09-21. Paid provider evaluation began on
-2026-09-22 and has completed every variant through 9×9 K=8. The final 9×9
-K=9 pass remains pending. On 2026-09-29 the operator approved raising the
-evaluation sublimit to $0.50 within the unchanged $1 monthly cap, completing
-K=9 and enabling experimental public play after reviewing its results. This
-supersedes the earlier decision to wait for October. Public Jev activation has
-not been performed. MCTS shipped with `JEV_ENABLED=false` (the default).
+2026-09-22 and completed every supported variant on 2026-09-29, including the
+final 20-game 9×9 K=9 sample. The operator approved a $0.50 evaluation sublimit
+within the unchanged $1 monthly cap and experimental public activation after
+reviewing the results. Evaluation acceptance is complete; public activation
+and its verification remain pending. MCTS shipped with `JEV_ENABLED=false`
+(the default).
 
 ## Production acceptance checkpoint
 
@@ -37,9 +37,9 @@ The accepted production state on 2026-09-21 is:
   up to five minutes of randomized delay.
 
 On 2026-09-22 the operator confirmed that the independent R2 bucket lifecycle
-rule was changed from 90 to 30 days, matching the script. The remaining work is
-to complete the approved paid evaluation, review its private results and only
-then decide whether to set `JEV_ENABLED=true`.
+rule was changed from 90 to 30 days, matching the script. At that checkpoint,
+paid evaluation and the decision to set `JEV_ENABLED=true` remained open;
+later acceptance is recorded below.
 
 Two initial paid evaluation attempts stopped before covering every variant. The first
 stopped during a 5×5 game; the second stopped at the 9×9 K=3 opening with the
@@ -111,6 +111,35 @@ estimated spending of $0.1728 over the last 30 days; that screenshot does not
 replace the UTC-month ledger or justify reducing its recorded spending.
 This approval does not establish that deployment, K=9 evaluation or activation
 has completed; those require their own production evidence.
+
+## Final paid evaluation acceptance — 2026-09-29
+
+The operator's VPS output confirms that the selective 9×9 K=9 evaluation ran
+on revision `b260783552232fa8e7a51b87c6709d135fca9849`, policy
+`jev-1.13.0:jev-game-v2`. Its systemd unit finished with `Result=success`,
+`ExecMainStatus=0`, and `ActiveState=inactive`. The private JSONL report contains
+one `complete`, 20 `game`, 395 `move`, two `tactic` and one `start` record, with
+no `stopped` or interrupted-game record. Both win and block tactics passed.
+
+| Opponent | Jev side | Wins | Draws | Losses |
+| --- | --- | ---: | ---: | ---: |
+| Random | X | 3 | 2 | 0 |
+| Random | O | 2 | 3 | 0 |
+| Rules | X | 0 | 1 | 4 |
+| Rules | O | 0 | 0 | 5 |
+
+For the 395 recorded Jev moves, average latency was 0.271433 s, p95 0.321193 s
+and maximum 0.790976 s. These are move timings, including any forced move that
+does not call the provider, rather than an API-only latency measurement.
+The existing September ledger increased from $0.175312662 to $0.216540618:
+$0.041227956 charged for this run, with accounting still available under the
+unchanged $1 cap. These figures describe application accounting, not an invoice.
+
+Together with the previously reviewed samples, every supported board/win-length
+variant has completed 20 games. Response legality, accounting and usable
+latency satisfy the experimental activation gate (J01.3). The small samples
+and weak results against Rules do not establish strong play. J01.4 still
+requires the production runtime flag and public human/series verification.
 
 ## Contract and availability
 

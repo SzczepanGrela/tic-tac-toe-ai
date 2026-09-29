@@ -8,10 +8,11 @@ merged as PR #24 (`4141e3a69f68d784eed792b8dea9be905d66c720`) and deployed
 with Jev disabled. Durable backup support followed in PRs #26 and #27. On
 2026-09-21 the production mount, ledger, rolling persistence, off-host backup
 and restore procedure passed operator acceptance. Paid provider evaluation and
-public Jev activation remain pending. Production evaluation has completed every
-variant through 9×9 K=8. On 2026-09-29 the operator approved increasing the
-evaluation sublimit to $0.50 within the unchanged $1 monthly cap to finish K=9
-now, followed by experimental public activation after reviewing the results.
+public Jev activation were separate acceptance steps. Production evaluation
+completed every supported variant on 2026-09-29, including the final 20-game
+9×9 K=9 sample under the approved $0.50 evaluation sublimit within the unchanged
+$1 monthly cap. Experimental activation is authorized; the runtime switch and
+public human/series verification remain pending.
 Measurements are development-machine observations unless explicitly described
 otherwise.
 
@@ -300,8 +301,8 @@ shared transactionally across processes and retained after uncertain calls.
 | G05.2 | complete | PR #24 passed the normal CI and protected digest deployment flow. The production release supports the focused 3×3/5×5/9×9 contract and shipped with Jev disabled. |
 | J01.1 | complete | SDK adapter, capabilities, incremental series, cancellation, shared ledger, private evaluator and mocked/API/browser tests implemented and released in PR #24. |
 | J01.2 | complete | The runtime-only key, shared host directory, version-1 ledger, tariff reconciliation, rolling-mount readback, daily local/R2 backup and isolated restore/reconcile drill passed on the VPS. The script and independent R2 bucket lifecycle rule both enforce 30-day remote retention. |
-| J01.3 | paid evaluation in progress | J01.2; PR #32 deployed the final boundary margin as `6151c71`. The earlier report completed 3×3 and all 5×5 variants. Selective 20-game production reports completed 9×9 K=3–8 with legal responses and usable latency; Jev was consistently weaker than Rules and tactical results varied. The operator approved a $0.50 evaluation sublimit on 2026-09-29 to finish K=9 without waiting for October. Deploy the increase, complete K=9, then review all private reports. Weak play can remain experimental. |
-| J01.4 | authorized after evaluation review; not activated | G05.2, J01.2, J01.3; enable optional agent after K=9 acceptance, verify human/series paths, disabled/error behavior and retained ledger after recreation/rollback. |
+| J01.3 | complete | Operator-pasted production reports cover 20 games per supported variant. Final K=9 on `b260783` completed 20 games / 395 Jev moves without interruption, passed both tactics and recorded p95 0.321 s / max 0.791 s. September accounting remained available at $0.216540618. [Results and scope](jev-operations.md#final-paid-evaluation-acceptance--2026-09-29). Weak play against Rules remains explicitly experimental. |
+| J01.4 | authorized; activation pending | G05.2, J01.2, J01.3 passed; enable the production runtime flag, verify public human/series paths and retained accounting. Prior disabled/error tests and ledger/rollback safeguards remain required. |
 
 Local evidence: 198 Python 3.12 tests, 15 browser scenarios and image smoke
 passed. Cases include simultaneous queue bursts, missing/paused accounting,
