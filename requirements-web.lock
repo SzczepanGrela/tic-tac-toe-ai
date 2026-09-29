@@ -435,9 +435,9 @@ truststore==0.10.4 \
     # via
     #   httpcore2
     #   httpx2
-typesafe-sdk==0.7.0 \
-    --hash=sha256:930d42fd73cfed6f25bccae488ce0f30f6043eaedd8682ef59734e79ab94a876 \
-    --hash=sha256:c6d2257c4b04b8d4d81cff2b55489b4188795fd44fb40b9cef26ff243b2d1080
+typesafe-sdk==0.7.1 \
+    --hash=sha256:495ce9d81733b4f95edcb156e95042a7ec4bfd59972a1150ffa8ce1e11f85a54 \
+    --hash=sha256:9d04eee13b5f64bbbe6f8e96cf40e3f39ca4efc934a1f4f39490cb9a43e9d2ad
     # via -r requirements-web.txt
 typing-extensions==4.16.0 \
     --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8 \
