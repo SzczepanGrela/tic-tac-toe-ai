@@ -101,6 +101,32 @@ def test_evaluation_has_a_sub_limit_in_the_same_monthly_budget(ledger):
     assert ledger.status()["used_nano_usd"] > jev_budget.EVALUATION_LIMIT
 
 
+def test_evaluation_limit_increase_reuses_existing_usage(ledger, monkeypatch):
+    previous_limit = 250_000_000
+    with monkeypatch.context() as previous_release:
+        previous_release.setattr(jev_budget, "EVALUATION_LIMIT", previous_limit)
+        for _ in range(previous_limit // RESERVATION):
+            ledger.reserve("evaluation")
+        with pytest.raises(BudgetExhausted, match="Evaluation budget exhausted"):
+            ledger.reserve("evaluation")
+        used_before = ledger.status()["used_nano_usd"]
+
+    replacement = BudgetLedger(ledger.path)
+    assert replacement.status()["used_nano_usd"] == used_before
+    replacement.reserve("evaluation")
+    assert replacement.status()["used_nano_usd"] == used_before + RESERVATION
+
+
+def test_evaluation_cannot_exceed_remaining_shared_budget(ledger):
+    ledger.reserve("production")
+    ledger.reconcile(MONTHLY_LIMIT - RESERVATION)
+    ledger.reserve("evaluation")
+    with pytest.raises(BudgetExhausted, match="Monthly Jev budget exhausted"):
+        ledger.reserve("evaluation")
+    assert ledger.status()["used_nano_usd"] == MONTHLY_LIMIT
+    assert not ledger.status()["available"]
+
+
 def test_changed_tariff_is_not_accepted(ledger):
     with sqlite3.connect(ledger.path) as db:
         db.execute("UPDATE policy SET price=1")
