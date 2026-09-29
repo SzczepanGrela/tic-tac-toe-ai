@@ -4,10 +4,11 @@ Implementation and local validation dated 2026-09-20. The disabled integration,
 runtime credentials, persistent accounting storage and backup/recovery path
 passed production acceptance on 2026-09-21. Paid provider evaluation began on
 2026-09-22 and has completed every variant through 9×9 K=8. The final 9×9
-K=9 pass is deferred until the evaluation sublimit resets on 2026-10-01. Public
-Jev activation has not been performed.
-The operator approves paid evaluation and activation separately. MCTS shipped
-with `JEV_ENABLED=false` (the default).
+K=9 pass remains pending. On 2026-09-29 the operator approved raising the
+evaluation sublimit to $0.50 within the unchanged $1 monthly cap, completing
+K=9 and enabling experimental public play after reviewing its results. This
+supersedes the earlier decision to wait for October. Public Jev activation has
+not been performed. MCTS shipped with `JEV_ENABLED=false` (the default).
 
 ## Production acceptance checkpoint
 
@@ -93,6 +94,24 @@ the UTC-month reset instead of being allowed to stop part-way. `JEV_ENABLED`
 remains `false`. This checkpoint does not establish K=9 quality or justify
 public activation.
 
+## Evaluation allowance update — 2026-09-29
+
+The operator approved a $0.50 monthly evaluation sublimit to finish the
+remaining 20-game 9×9 K=9 sample now. The overall monthly cap remains $1 and
+includes all evaluation spending; the increase is not a separate allowance.
+Deploy the new image before running only `--variant 9:9 --games-per-side 5`.
+Keep the public web process at `JEV_ENABLED=false` during evaluation, then
+review legal responses, accounting and latency before public activation.
+Previously reviewed weak play is acceptable under the experimental label.
+
+The sublimit is enforced in code. The existing version-1 SQLite ledger needs
+no migration, reinitialization or reconciliation for this change. Its settled
+usage and uncertain reservations remain charged. The provider dashboard showed
+estimated spending of $0.1728 over the last 30 days; that screenshot does not
+replace the UTC-month ledger or justify reducing its recorded spending.
+This approval does not establish that deployment, K=9 evaluation or activation
+has completed; those require their own production evidence.
+
 ## Contract and availability
 
 The official `typesafe-sdk==0.7.1` async client uses pinned model `jev-1.13.0`
@@ -141,7 +160,7 @@ or process death keeps the full amount. Settlement is idempotent. Invalid usage
 cannot release the reservation. A different returned model pauses the ledger.
 
 The shared cap is **$1 per calendar UTC month**, including tests, across rolling
-replicas. Evaluations have a **$0.25 monthly sublimit inside that $1**, not an
+replicas. Evaluations have a **$0.50 monthly sublimit inside that $1**, not an
 additional allowance. Budget is checked against the next full reservation, so
 availability can end slightly before $1. Calls belong to their reservation's UTC
 month, including calls completed across midnight. The ledger stores monthly
