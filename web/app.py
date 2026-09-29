@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import math
 import os
 import random
@@ -40,6 +41,7 @@ AI_ACTIVE_LIMIT = 2
 AI_WAITING_LIMIT = 8
 AI_MOVE_TIMEOUT_SECONDS = 5.0
 AI_MATCH_TIMEOUT_SECONDS = 30.0
+STREAM_LOGGER = logging.getLogger("uvicorn.error.delivery")
 T = TypeVar("T")
 
 
@@ -485,27 +487,69 @@ async def _prepare_matches(payload: MatchRequest, request: Request) -> int:
     return payload.seed if payload.seed is not None else secrets.randbits(32)
 
 
+def _simulate_stream_game(stream_id: str, payload: MatchRequest, registry: AgentRegistry,
+                          rng: random.Random, game_number: int) -> GameTrace:
+    """Log actual work completion in the worker, independently of HTTP closure."""
+    started = time.monotonic()
+    outcome = "error"
+    STREAM_LOGGER.info("stream_work id=%s game=%d event=started", stream_id, game_number)
+    try:
+        trace = _simulate_match_game(payload, registry, rng, game_number)
+        outcome = "completed"
+        return trace
+    except SearchStopped:
+        outcome = "stopped"
+        raise
+    finally:
+        STREAM_LOGGER.info(
+            "stream_work id=%s game=%d event=finished outcome=%s elapsed_ms=%.1f",
+            stream_id, game_number, outcome, (time.monotonic() - started) * 1000,
+        )
+
+
 @app.post("/api/matches/stream")
 async def stream_matches(payload: MatchRequest, request: Request) -> StreamingResponse:
     seed = await _prepare_matches(payload, request)
     registry = request.app.state.registry
+    stream_id = secrets.token_hex(16)
 
     async def events():
         rng = random.Random(seed)
-        deadline = time.monotonic() + AI_MATCH_TIMEOUT_SECONDS
-        for game_number in range(1, payload.games + 1):
-            try:
-                trace = await _run_ai_work(
-                    request, _simulate_match_game, payload, registry, rng, game_number,
-                    timeout_seconds=max(0.001, deadline - time.monotonic()),
-                )
-            except HTTPException as exc:
-                yield json.dumps({"type": "error", "detail": exc.detail}) + "\n"
-                return
-            yield json.dumps({"type": "game", "game": trace.model_dump()}) + "\n"
-        yield '{"type":"complete"}\n'
+        started = time.monotonic()
+        deadline = started + AI_MATCH_TIMEOUT_SECONDS
+        completed = 0
+        outcome = "error"
+        STREAM_LOGGER.info(
+            "match_stream id=%s event=opened requested_games=%d", stream_id, payload.games,
+        )
+        try:
+            for game_number in range(1, payload.games + 1):
+                try:
+                    trace = await _run_ai_work(
+                        request, _simulate_stream_game, stream_id,
+                        payload, registry, rng, game_number,
+                        timeout_seconds=max(0.001, deadline - time.monotonic()),
+                    )
+                except HTTPException as exc:
+                    yield json.dumps({"type": "error", "detail": exc.detail}) + "\n"
+                    return
+                completed += 1
+                yield json.dumps({"type": "game", "game": trace.model_dump()}) + "\n"
+            yield '{"type":"complete"}\n'
+            outcome = "complete"
+        except (asyncio.CancelledError, GeneratorExit):
+            outcome = "cancelled"
+            raise
+        finally:
+            STREAM_LOGGER.info(
+                "match_stream id=%s event=closed outcome=%s "
+                "completed_games=%d requested_games=%d elapsed_ms=%.1f",
+                stream_id, outcome, completed, payload.games,
+                (time.monotonic() - started) * 1000,
+            )
 
     return StreamingResponse(events(), media_type="application/x-ndjson", headers={
         "Cache-Control": "no-cache, no-transform",
         "X-Accel-Buffering": "no",
+        "X-Stream-ID": stream_id,
     })

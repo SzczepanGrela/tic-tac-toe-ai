@@ -51,6 +51,30 @@ The existing browser tests preserve completed games after a stopped series.
 6. Record limits during old/new container overlap and long-running request
    termination separately; do not infer them from a steady-state check.
 
+## Correlating public disconnects with work
+
+An accepted stream returns a server-generated `X-Stream-ID` header. Incoming
+values of that header are ignored. The normal Uvicorn INFO log records that
+ID with `match_stream` opened/closed events and `stream_work` started/finished
+events for each game. Fields contain only that random ID, game counts/numbers,
+outcome and elapsed time; they do not include client identity, headers, seed,
+board, moves or credentials. Existing Docker log rotation applies.
+
+Capture the header and UTC time, consume the first game from a bounded MCTS
+series, then close the client connection. Read only log lines with that exact
+ID from the corresponding container. A cancelled stream should stop before
+all requested games are computed. Every started game must have a finished
+event; a cooperative interruption has `outcome=stopped`. A game that finished
+before the disconnect can have `outcome=completed`. Check for later game starts
+and check public health after the operation. Do not count a client/stream
+closure alone as proof of worker completion: timeout/cancellation may close
+HTTP while the worker is still exiting. The worker's own finally block emits
+its finished event. Pool threads can remain idle for reuse afterwards.
+
+Local real-HTTP regression tests cover these records, including a timed-out
+response whose worker finishes later. Public proxy-chain acceptance still
+requires the correlated operator log; adding these events does not close D04.
+
 ## Explicit limitations
 
 The move and series buckets, two active work slots and eight waiting places
