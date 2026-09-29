@@ -6,9 +6,11 @@ passed production acceptance on 2026-09-21. Paid provider evaluation began on
 2026-09-22 and completed every supported variant on 2026-09-29, including the
 final 20-game 9×9 K=9 sample. The operator approved a $0.50 evaluation sublimit
 within the unchanged $1 monthly cap and experimental public activation after
-reviewing the results. Evaluation acceptance is complete; public activation
-and its verification remain pending. MCTS shipped with `JEV_ENABLED=false`
-(the default).
+reviewing the results. On 2026-09-29 the operator enabled the production runtime
+flag and redeployed; public capabilities, human play, an incremental series and
+replay passed verification. A private ledger readback confirmed retained
+spending and available budget after activation, completing J01.4.
+`JEV_ENABLED=false` remains the safe image default.
 
 ## Production acceptance checkpoint
 
@@ -138,8 +140,40 @@ unchanged $1 cap. These figures describe application accounting, not an invoice.
 Together with the previously reviewed samples, every supported board/win-length
 variant has completed 20 games. Response legality, accounting and usable
 latency satisfy the experimental activation gate (J01.3). The small samples
-and weak results against Rules do not establish strong play. J01.4 still
-requires the production runtime flag and public human/series verification.
+and weak results against Rules do not establish strong play. Public activation
+was verified subsequently as described below.
+
+## Public activation — 2026-09-29
+
+The operator saved production `JEV_ENABLED=true` in Coolify and performed a
+redeploy. Runtime environment changes require a newly created container;
+saving the setting alone does not update the running process. Public readback
+still identified qualified revision `b260783552232fa8e7a51b87c6709d135fca9849`,
+now reporting Jev available, with no unavailability reason and with the
+experimental flag, incremental series and non-reproducible seed metadata.
+Capability checks passed for 3×3 K=3, 5×5 K=5 and 9×9 K=9.
+
+A Chromium check received a legal Jev reply to one human move. The verification
+script then waited on a speed control before it was visible; this was a test
+ordering error before any series had started. After correcting that ordering,
+a series-only continuation completed one 3×3 Jev-X versus Random-O game,
+with Jev winning. That series issued five `/api/move` requests, three for Jev,
+and no batch-match request. Replay issued no new move request. The experimental
+label was visible; the completed browser check reported zero page errors and
+zero CSP violations. The two attempts together used four Jev move requests.
+This is a bounded public smoke test, not new strength or load-test evidence.
+
+The pending deployment of documentation-only PR #43 was deliberately cancelled
+after the manual redeploy; its Quality and release-verification jobs had passed.
+It did not replace the serving image. The operator's final private ledger
+readback reported September spending of $0.216710928, limit $1 and
+`available=true`. The amount increased by $0.000170310 from the pre-activation
+$0.216540618, confirming that prior spending survived recreation. Public
+availability alone would not expose or prove that retained amount.
+
+To withdraw the optional agent, save `JEV_ENABLED=false` and redeploy. Preserve
+the existing ledger and provider accounting. Reverting an image by itself does
+not undo a separately saved runtime flag.
 
 ## Contract and availability
 

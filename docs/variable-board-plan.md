@@ -11,8 +11,9 @@ and restore procedure passed operator acceptance. Paid provider evaluation and
 public Jev activation were separate acceptance steps. Production evaluation
 completed every supported variant on 2026-09-29, including the final 20-game
 9×9 K=9 sample under the approved $0.50 evaluation sublimit within the unchanged
-$1 monthly cap. Experimental activation is authorized; the runtime switch and
-public human/series verification remain pending.
+$1 monthly cap. The operator enabled experimental Jev and redeployed on
+2026-09-29; public human/series/replay checks passed. The final private
+ledger readback confirmed retained spending and available budget, closing J01.4.
 Measurements are development-machine observations unless explicitly described
 otherwise.
 
@@ -302,7 +303,7 @@ shared transactionally across processes and retained after uncertain calls.
 | J01.1 | complete | SDK adapter, capabilities, incremental series, cancellation, shared ledger, private evaluator and mocked/API/browser tests implemented and released in PR #24. |
 | J01.2 | complete | The runtime-only key, shared host directory, version-1 ledger, tariff reconciliation, rolling-mount readback, daily local/R2 backup and isolated restore/reconcile drill passed on the VPS. The script and independent R2 bucket lifecycle rule both enforce 30-day remote retention. |
 | J01.3 | complete | Operator-pasted production reports cover 20 games per supported variant. Final K=9 on `b260783` completed 20 games / 395 Jev moves without interruption, passed both tactics and recorded p95 0.321 s / max 0.791 s. September accounting remained available at $0.216540618. [Results and scope](jev-operations.md#final-paid-evaluation-acceptance--2026-09-29). Weak play against Rules remains explicitly experimental. |
-| J01.4 | authorized; activation pending | G05.2, J01.2, J01.3 passed; enable the production runtime flag, verify public human/series paths and retained accounting. Prior disabled/error tests and ledger/rollback safeguards remain required. |
+| J01.4 | complete | Operator enabled the runtime flag and redeployed `b260783`. Public capability, legal human reply, one incremental Jev–Random series and replay without new API calls passed; experimental labeling is visible. Private post-redeploy readback retained prior spending at $0.216710928 with the $1 limit and available budget. Prior disabled/error tests and ledger/rollback safeguards remain required. [Activation evidence](jev-operations.md#public-activation--2026-09-29). |
 
 Local evidence: 198 Python 3.12 tests, 15 browser scenarios and image smoke
 passed. Cases include simultaneous queue bursts, missing/paused accounting,
