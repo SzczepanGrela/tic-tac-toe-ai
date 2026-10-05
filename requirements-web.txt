@@ -1,5 +1,5 @@
 -r requirements-core.txt
-fastapi>=0.141.1,<1
+fastapi>=0.142.2,<1
 onnxruntime>=1.30.0,<2
-uvicorn[standard]>=0.53.0,<1
-typesafe-sdk==0.7.1
+uvicorn[standard]>=0.54.0,<1
+typesafe-sdk==0.7.2
